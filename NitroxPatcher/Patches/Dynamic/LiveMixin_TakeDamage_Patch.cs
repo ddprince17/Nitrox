@@ -52,6 +52,11 @@ public sealed partial class LiveMixin_TakeDamage_Patch : NitroxPatch, IDynamicPa
             return;
         }
 
+        if (HandleRemotePlayerCreatureDamage(__state, __instance, dealer))
+        {
+            return;
+        }
+
         BroadcastDefaultTookDamage(__instance);
     }
 
@@ -83,6 +88,28 @@ public sealed partial class LiveMixin_TakeDamage_Patch : NitroxPatch, IDynamicPa
         }
 
         Resolve<IPacketSender>().Send(new PvPAttack(remotePlayerIdentifier.RemotePlayer.SessionId, damage, attackType));
+        return true;
+    }
+
+    private static bool HandleRemotePlayerCreatureDamage(float previousHealth, LiveMixin liveMixin, GameObject dealer)
+    {
+        if (!dealer ||
+            !liveMixin.TryGetComponent(out RemotePlayerIdentifier remotePlayerIdentifier) ||
+            !dealer.TryGetComponentInParent(out Creature creature) ||
+            creature is SeaDragon ||
+            !creature.TryGetNitroxId(out NitroxId creatureId) ||
+            !Resolve<SimulationOwnership>().HasAnyLockType(creatureId))
+        {
+            return false;
+        }
+
+        float damageDealt = previousHealth - liveMixin.health;
+        if (damageDealt <= 0f)
+        {
+            return false;
+        }
+
+        Resolve<IPacketSender>().Send(new CreatureAttack(creatureId, remotePlayerIdentifier.RemotePlayer.SessionId, damageDealt));
         return true;
     }
 
