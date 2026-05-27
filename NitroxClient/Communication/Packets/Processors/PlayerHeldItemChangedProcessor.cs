@@ -1,7 +1,6 @@
 ﻿using System;
 using Nitrox.Model.Core;
 using Nitrox.Model.DataStructures;
-using Nitrox.Model.Helper;
 using Nitrox.Model.Subnautica.Packets;
 using NitroxClient.Communication.Packets.Processors.Core;
 using NitroxClient.GameLogic;
@@ -40,9 +39,11 @@ internal sealed class PlayerHeldItemChangedProcessor : IClientPacketProcessor<Pl
         }
 
         Pickupable pickupable = item.GetComponent<Pickupable>();
-        Validate.IsTrue(pickupable);
-
-        Validate.NotNull(pickupable.inventoryItem);
+        if (!pickupable)
+        {
+            Log.Warn($"[{nameof(PlayerHeldItemChangedProcessor)}] Entity with id: {packet.ItemId} is not a pickupable.");
+            return Task.CompletedTask;
+        }
 
         ItemsContainer inventory = player.Inventory;
         PlayerTool tool = item.GetComponent<PlayerTool>();
@@ -51,7 +52,12 @@ internal sealed class PlayerHeldItemChangedProcessor : IClientPacketProcessor<Pl
         switch (packet.Type)
         {
             case PlayerHeldItemChanged.ChangeType.DRAW_AS_TOOL:
-                Validate.IsTrue(tool);
+                if (!tool)
+                {
+                    Log.Warn($"[{nameof(PlayerHeldItemChangedProcessor)}] Entity with id: {packet.ItemId} is not a player tool.");
+                    return Task.CompletedTask;
+                }
+
                 ModelPlug.PlugIntoSocket(tool, player.ItemAttachPoint);
                 Utils.SetLayerRecursively(item, viewModelLayer);
                 foreach (Animator componentsInChild in tool.GetComponentsInChildren<Animator>())
@@ -62,7 +68,10 @@ internal sealed class PlayerHeldItemChangedProcessor : IClientPacketProcessor<Pl
                 {
                     tool.mainCollider.enabled = false;
                 }
-                tool.GetComponent<Rigidbody>().isKinematic = true;
+                if (tool.TryGetComponent(out Rigidbody toolRigidbody))
+                {
+                    toolRigidbody.isKinematic = true;
+                }
                 if (tool.TryGetComponent(out Floater floater))
                 {
                     floater.collider.enabled = false;
@@ -79,19 +88,34 @@ internal sealed class PlayerHeldItemChangedProcessor : IClientPacketProcessor<Pl
                 break;
 
             case PlayerHeldItemChanged.ChangeType.HOLSTER_AS_TOOL:
-                Validate.IsTrue(tool);
+                if (!tool)
+                {
+                    Log.Warn($"[{nameof(PlayerHeldItemChangedProcessor)}] Entity with id: {packet.ItemId} is not a player tool.");
+                    return Task.CompletedTask;
+                }
+
                 item.SetActive(false);
                 Utils.SetLayerRecursively(item, defaultLayer);
                 if (tool.mainCollider)
                 {
                     tool.mainCollider.enabled = true;
                 }
-                tool.GetComponent<Rigidbody>().isKinematic = false;
+                if (tool.TryGetComponent(out toolRigidbody))
+                {
+                    toolRigidbody.isKinematic = false;
+                }
                 if (tool.TryGetComponent(out floater))
                 {
                     floater.collider.enabled = true;
                 }
-                pickupable.inventoryItem.item.Reparent(inventory.tr);
+                if (pickupable.inventoryItem != null)
+                {
+                    pickupable.inventoryItem.item.Reparent(inventory.tr);
+                }
+                else
+                {
+                    Log.Warn($"[{nameof(PlayerHeldItemChangedProcessor)}] Pickupable with id: {packet.ItemId} has no inventory item while holstering tool.");
+                }
                 foreach (Animator componentsInChild in tool.GetComponentsInChildren<Animator>())
                 {
                     componentsInChild.cullingMode = AnimatorCullingMode.CullUpdateTransforms;
@@ -107,12 +131,24 @@ internal sealed class PlayerHeldItemChangedProcessor : IClientPacketProcessor<Pl
                 break;
 
             case PlayerHeldItemChanged.ChangeType.DRAW_AS_ITEM:
+                if (pickupable.inventoryItem == null)
+                {
+                    Log.Warn($"[{nameof(PlayerHeldItemChangedProcessor)}] Pickupable with id: {packet.ItemId} has no inventory item while drawing item.");
+                    return Task.CompletedTask;
+                }
+
                 pickupable.inventoryItem.item.Reparent(player.ItemAttachPoint);
                 pickupable.inventoryItem.item.SetVisible(true);
                 Utils.SetLayerRecursively(pickupable.inventoryItem.item.gameObject, viewModelLayer);
                 break;
 
             case PlayerHeldItemChanged.ChangeType.HOLSTER_AS_ITEM:
+                if (pickupable.inventoryItem == null)
+                {
+                    Log.Warn($"[{nameof(PlayerHeldItemChangedProcessor)}] Pickupable with id: {packet.ItemId} has no inventory item while holstering item.");
+                    return Task.CompletedTask;
+                }
+
                 pickupable.inventoryItem.item.Reparent(inventory.tr);
                 pickupable.inventoryItem.item.SetVisible(false);
                 Utils.SetLayerRecursively(pickupable.inventoryItem.item.gameObject, defaultLayer);

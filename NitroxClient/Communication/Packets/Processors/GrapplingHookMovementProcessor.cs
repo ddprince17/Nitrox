@@ -9,7 +9,12 @@ internal sealed class GrapplingHookMovementProcessor : IClientPacketProcessor<Gr
 {
     public Task Process(ClientProcessorContext context, GrapplingHookMovement packet)
     {
-        Exosuit exosuit = NitroxEntity.RequireObjectFrom(packet.ExosuitId).RequireComponent<Exosuit>();
+        if (!NitroxEntity.TryGetComponentFrom(packet.ExosuitId, out Exosuit exosuit))
+        {
+            Log.Warn($"[{nameof(GrapplingHookMovementProcessor)}] Could not find Exosuit with id: {packet.ExosuitId}.");
+            return Task.CompletedTask;
+        }
+
         IExosuitArm arm = packet.ArmSide == Exosuit.Arm.Left ? exosuit.leftArm : exosuit.rightArm;
 
         if (arm is not ExosuitGrapplingArm grapplingArm)

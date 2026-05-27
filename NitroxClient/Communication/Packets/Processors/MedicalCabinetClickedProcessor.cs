@@ -10,8 +10,17 @@ internal sealed class MedicalCabinetClickedProcessor : IClientPacketProcessor<Me
 {
     public Task Process(ClientProcessorContext context, MedicalCabinetClicked packet)
     {
-        GameObject gameObject = NitroxEntity.RequireObjectFrom(packet.Id);
-        MedicalCabinet cabinet = gameObject.RequireComponent<MedicalCabinet>();
+        if (!NitroxEntity.TryGetObjectFrom(packet.Id, out GameObject gameObject))
+        {
+            Log.Warn($"[{nameof(MedicalCabinetClickedProcessor)}] Could not find entity with id: {packet.Id}.");
+            return Task.CompletedTask;
+        }
+
+        if (!gameObject.TryGetComponent(out MedicalCabinet cabinet))
+        {
+            Log.Warn($"[{nameof(MedicalCabinetClickedProcessor)}] Entity with id: {packet.Id} has no MedicalCabinet component.");
+            return Task.CompletedTask;
+        }
 
         bool medkitPickedUp = !packet.HasMedKit && cabinet.hasMedKit;
         bool doorChangedState = cabinet.doorOpen != packet.DoorOpen;

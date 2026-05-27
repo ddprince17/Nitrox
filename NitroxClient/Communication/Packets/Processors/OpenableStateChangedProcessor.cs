@@ -10,8 +10,17 @@ internal sealed class OpenableStateChangedProcessor : IClientPacketProcessor<Ope
 {
     public Task Process(ClientProcessorContext context, OpenableStateChanged packet)
     {
-        GameObject gameObject = NitroxEntity.RequireObjectFrom(packet.Id);
-        Openable openable = gameObject.RequireComponent<Openable>();
+        if (!NitroxEntity.TryGetObjectFrom(packet.Id, out GameObject gameObject))
+        {
+            Log.Warn($"[{nameof(OpenableStateChangedProcessor)}] Could not find entity with id: {packet.Id}.");
+            return Task.CompletedTask;
+        }
+
+        if (!gameObject.TryGetComponent(out Openable openable))
+        {
+            Log.Warn($"[{nameof(OpenableStateChangedProcessor)}] Entity with id: {packet.Id} has no Openable component.");
+            return Task.CompletedTask;
+        }
 
         using (PacketSuppressor<OpenableStateChanged>.Suppress())
         {

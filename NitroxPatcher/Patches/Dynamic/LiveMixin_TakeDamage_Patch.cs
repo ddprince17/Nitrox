@@ -46,13 +46,13 @@ public sealed partial class LiveMixin_TakeDamage_Patch : NitroxPatch, IDynamicPa
             return;
         }
 
-        // At this point, if the victim didn't take damage, there's no point in broadcasting it
-        if (__state == __instance.health)
+        if (HandleRemotePlayerCreatureDamage(originalDamage, __instance, dealer))
         {
             return;
         }
 
-        if (HandleRemotePlayerCreatureDamage(__state, __instance, dealer))
+        // At this point, if the victim didn't take damage, there's no point in broadcasting it
+        if (__state == __instance.health)
         {
             return;
         }
@@ -91,11 +91,22 @@ public sealed partial class LiveMixin_TakeDamage_Patch : NitroxPatch, IDynamicPa
         return true;
     }
 
-    private static bool HandleRemotePlayerCreatureDamage(float previousHealth, LiveMixin liveMixin, GameObject dealer)
+    private static bool HandleRemotePlayerCreatureDamage(float damage, LiveMixin liveMixin, GameObject dealer)
     {
-        if (!dealer ||
+        if (!dealer || !dealer.TryGetComponentInParent(out Creature creature))
+        {
+            return false;
+        }
+
+        return TryBroadcastRemotePlayerCreatureDamage(damage, liveMixin, creature);
+    }
+
+    internal static bool TryBroadcastRemotePlayerCreatureDamage(float damage, LiveMixin liveMixin, Creature creature)
+    {
+        if (damage <= 0f ||
+            !liveMixin ||
+            !creature ||
             !liveMixin.TryGetComponent(out RemotePlayerIdentifier remotePlayerIdentifier) ||
-            !dealer.TryGetComponentInParent(out Creature creature) ||
             creature is SeaDragon ||
             !creature.TryGetNitroxId(out NitroxId creatureId) ||
             !Resolve<SimulationOwnership>().HasAnyLockType(creatureId))
@@ -103,13 +114,7 @@ public sealed partial class LiveMixin_TakeDamage_Patch : NitroxPatch, IDynamicPa
             return false;
         }
 
-        float damageDealt = previousHealth - liveMixin.health;
-        if (damageDealt <= 0f)
-        {
-            return false;
-        }
-
-        Resolve<IPacketSender>().Send(new CreatureAttack(creatureId, remotePlayerIdentifier.RemotePlayer.SessionId, damageDealt));
+        Resolve<IPacketSender>().Send(new CreatureAttack(creatureId, remotePlayerIdentifier.RemotePlayer.SessionId, damage));
         return true;
     }
 
