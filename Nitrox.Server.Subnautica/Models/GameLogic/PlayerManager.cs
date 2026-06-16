@@ -29,6 +29,11 @@ internal sealed partial class PlayerManager(SessionManager sessionManager, IOpti
     private readonly ThreadSafeDictionary<string, PlayerContext> reservations = [];
     private readonly ThreadSafeSet<string> reservedPlayerNames = new("Player"); // "Player" is often used to identify the local player and should not be used by any user
 
+    // Reservation (name-uniqueness + capacity check + reservation/asset inserts) must be atomic across the individually
+    // thread-safe collections above; otherwise two clients submitting the same username concurrently can both pass the
+    // uniqueness check before either inserts. ReservePlayerContext and the OnEventAsync cleanup both take this lock.
+    private readonly Lock reservationLock = new();
+
     private readonly SessionManager sessionManager = sessionManager;
     private readonly IOptions<SubnauticaServerOptions> options = options;
     private readonly ILogger<PlayerManager> logger = logger;
@@ -74,64 +79,67 @@ internal sealed partial class PlayerManager(SessionManager sessionManager, IOpti
         AuthenticationContext authenticationContext,
         string correlationId)
     {
-        if (Math.Min(reservedPlayerNames.Count - 1, 0) >= options.Value.MaxConnections)
+        lock (reservationLock)
         {
-            MultiplayerSessionReservationState rejectedState = MultiplayerSessionReservationState.REJECTED | MultiplayerSessionReservationState.SERVER_PLAYER_CAPACITY_REACHED;
-            return new MultiplayerSessionReservation(correlationId, rejectedState);
+            if (Math.Min(reservedPlayerNames.Count - 1, 0) >= options.Value.MaxConnections)
+            {
+                MultiplayerSessionReservationState rejectedState = MultiplayerSessionReservationState.REJECTED | MultiplayerSessionReservationState.SERVER_PLAYER_CAPACITY_REACHED;
+                return new MultiplayerSessionReservation(correlationId, rejectedState);
+            }
+
+            if (!string.IsNullOrEmpty(options.Value.ServerPassword) && (!authenticationContext.ServerPassword.HasValue || authenticationContext.ServerPassword.Value != options.Value.ServerPassword))
+            {
+                MultiplayerSessionReservationState rejectedState = MultiplayerSessionReservationState.REJECTED | MultiplayerSessionReservationState.AUTHENTICATION_FAILED;
+                return new MultiplayerSessionReservation(correlationId, rejectedState);
+            }
+
+
+            if (!PlayerNameRegex().IsMatch(authenticationContext.Username))
+            {
+                MultiplayerSessionReservationState rejectedState = MultiplayerSessionReservationState.REJECTED | MultiplayerSessionReservationState.INCORRECT_USERNAME;
+                return new MultiplayerSessionReservation(correlationId, rejectedState);
+            }
+
+            string playerName = authenticationContext.Username;
+
+            allPlayersByName.TryGetValue(playerName, out Player? player);
+            if (player?.IsPermaDeath == true && options.Value.IsHardcore())
+            {
+                MultiplayerSessionReservationState rejectedState = MultiplayerSessionReservationState.REJECTED | MultiplayerSessionReservationState.HARDCORE_PLAYER_DEAD;
+                return new MultiplayerSessionReservation(correlationId, rejectedState);
+            }
+
+            if (reservedPlayerNames.Contains(playerName))
+            {
+                MultiplayerSessionReservationState rejectedState = MultiplayerSessionReservationState.REJECTED | MultiplayerSessionReservationState.UNIQUE_PLAYER_NAME_CONSTRAINT_VIOLATED;
+                return new MultiplayerSessionReservation(correlationId, rejectedState);
+            }
+
+            assetsBySessionId.TryGetValue(sessionId, out ConnectionAssets assetPackage);
+            if (assetPackage == null)
+            {
+                assetPackage = new ConnectionAssets();
+                assetsBySessionId.Add(sessionId, assetPackage);
+                reservedPlayerNames.Add(playerName);
+            }
+
+            bool hasSeenPlayerBefore = player != null;
+            NitroxId playerNitroxId = hasSeenPlayerBefore ? player.GameObjectId : new NitroxId();
+            SubnauticaGameMode gameMode = hasSeenPlayerBefore ? player.GameMode : options.Value.GameMode;
+            IntroCinematicMode introCinematicMode = hasSeenPlayerBefore ? IntroCinematicMode.COMPLETED : IntroCinematicMode.LOADING;
+            PlayerAnimation animation = new(AnimChangeType.UNDERWATER, AnimChangeState.ON);
+
+            SessionManager.Session session = sessionManager.GetOrCreateSession(endPoint);
+
+            // TODO: At some point, store the muted state of a player
+            PlayerContext playerContext = new(playerName, session.Id, playerNitroxId, !hasSeenPlayerBefore, playerSettings, false, gameMode, null, introCinematicMode, animation);
+            string reservationKey = Guid.NewGuid().ToString();
+
+            reservations.Add(reservationKey, playerContext);
+            assetPackage.ReservationKey = reservationKey;
+
+            return new MultiplayerSessionReservation(correlationId, session.Id, reservationKey);
         }
-
-        if (!string.IsNullOrEmpty(options.Value.ServerPassword) && (!authenticationContext.ServerPassword.HasValue || authenticationContext.ServerPassword.Value != options.Value.ServerPassword))
-        {
-            MultiplayerSessionReservationState rejectedState = MultiplayerSessionReservationState.REJECTED | MultiplayerSessionReservationState.AUTHENTICATION_FAILED;
-            return new MultiplayerSessionReservation(correlationId, rejectedState);
-        }
-
-
-        if (!PlayerNameRegex().IsMatch(authenticationContext.Username))
-        {
-            MultiplayerSessionReservationState rejectedState = MultiplayerSessionReservationState.REJECTED | MultiplayerSessionReservationState.INCORRECT_USERNAME;
-            return new MultiplayerSessionReservation(correlationId, rejectedState);
-        }
-
-        string playerName = authenticationContext.Username;
-
-        allPlayersByName.TryGetValue(playerName, out Player? player);
-        if (player?.IsPermaDeath == true && options.Value.IsHardcore())
-        {
-            MultiplayerSessionReservationState rejectedState = MultiplayerSessionReservationState.REJECTED | MultiplayerSessionReservationState.HARDCORE_PLAYER_DEAD;
-            return new MultiplayerSessionReservation(correlationId, rejectedState);
-        }
-
-        if (reservedPlayerNames.Contains(playerName))
-        {
-            MultiplayerSessionReservationState rejectedState = MultiplayerSessionReservationState.REJECTED | MultiplayerSessionReservationState.UNIQUE_PLAYER_NAME_CONSTRAINT_VIOLATED;
-            return new MultiplayerSessionReservation(correlationId, rejectedState);
-        }
-
-        assetsBySessionId.TryGetValue(sessionId, out ConnectionAssets assetPackage);
-        if (assetPackage == null)
-        {
-            assetPackage = new ConnectionAssets();
-            assetsBySessionId.Add(sessionId, assetPackage);
-            reservedPlayerNames.Add(playerName);
-        }
-
-        bool hasSeenPlayerBefore = player != null;
-        NitroxId playerNitroxId = hasSeenPlayerBefore ? player.GameObjectId : new NitroxId();
-        SubnauticaGameMode gameMode = hasSeenPlayerBefore ? player.GameMode : options.Value.GameMode;
-        IntroCinematicMode introCinematicMode = hasSeenPlayerBefore ? IntroCinematicMode.COMPLETED : IntroCinematicMode.LOADING;
-        PlayerAnimation animation = new(AnimChangeType.UNDERWATER, AnimChangeState.ON);
-
-        SessionManager.Session session = sessionManager.GetOrCreateSession(endPoint);
-
-        // TODO: At some point, store the muted state of a player
-        PlayerContext playerContext = new(playerName, session.Id, playerNitroxId, !hasSeenPlayerBefore, playerSettings, false, gameMode, null, introCinematicMode, animation);
-        string reservationKey = Guid.NewGuid().ToString();
-
-        reservations.Add(reservationKey, playerContext);
-        assetPackage.ReservationKey = reservationKey;
-
-        return new MultiplayerSessionReservation(correlationId, session.Id, reservationKey);
     }
 
     public Player CreatePlayerData(SessionId sessionId, string reservationKey, out bool wasBrandNewPlayer)
@@ -230,21 +238,24 @@ internal sealed partial class PlayerManager(SessionManager sessionManager, IOpti
             return Task.CompletedTask;
         }
 
-        if (assetPackage.ReservationKey != null)
+        lock (reservationLock)
         {
-            PlayerContext playerContext = reservations[assetPackage.ReservationKey];
-            reservedPlayerNames.Remove(playerContext.PlayerName);
-            reservations.Remove(assetPackage.ReservationKey);
-        }
+            if (assetPackage.ReservationKey != null)
+            {
+                PlayerContext playerContext = reservations[assetPackage.ReservationKey];
+                reservedPlayerNames.Remove(playerContext.PlayerName);
+                reservations.Remove(assetPackage.ReservationKey);
+            }
 
-        if (assetPackage.Player != null)
-        {
-            reservedPlayerNames.Remove(player.Name);
-            connectedPlayersBySessionId.Remove(player.SessionId);
-            logger.ZLogInformation($"{player.Name} left the game");
-        }
+            if (assetPackage.Player != null)
+            {
+                reservedPlayerNames.Remove(player.Name);
+                connectedPlayersBySessionId.Remove(player.SessionId);
+                logger.ZLogInformation($"{player.Name} left the game");
+            }
 
-        assetsBySessionId.Remove(player.SessionId);
+            assetsBySessionId.Remove(player.SessionId);
+        }
         return Task.CompletedTask;
     }
 }

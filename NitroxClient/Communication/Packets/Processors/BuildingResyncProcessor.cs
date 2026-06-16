@@ -123,6 +123,13 @@ internal sealed class BuildingResyncProcessor(Entities entities, EntityMetadataM
             E entity = entitiesToUpdate[i];
             C associatedComponent = unmarkedComponents.Find(c =>
                                                                 correspondingPredicate(entity, c));
+            if (!associatedComponent)
+            {
+                // No matching local component (e.g. a base/module the client is missing): leave the entity
+                // in entitiesToUpdate so the spawn-fresh fallback below recreates it, instead of calling
+                // overwrite(null, ...) which NREs (and was previously swallowed, dropping the entity).
+                continue;
+            }
             yield return overwrite(associatedComponent, entity).OnYieldError(Log.Error);
 
             unmarkedComponents.Remove(associatedComponent);

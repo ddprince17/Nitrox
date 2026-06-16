@@ -164,90 +164,95 @@ internal sealed class BuildingManager
 
     public bool UpdateBase(Player player, UpdateBase updateBase, out int operationId)
     {
-        if (!entityRegistry.TryGetEntityById<GhostEntity>(updateBase.FormerGhostId, out _))
+        // Serialize the whole read-gate-mutate-increment region on the shared entity-tree lock so two players editing
+        // the same base can't both pass the OperationId gate and double-apply geometry under one operation id.
+        lock (entityRegistry.TreeLock)
         {
-            logger.ZLogError($"Trying to place a base from a non-registered ghost (GhostId: {updateBase.FormerGhostId})");
-            NotifyPlayerDesync(player);
-            operationId = -1;
-            return false;
-        }
-        if (!entityRegistry.TryGetEntityById(updateBase.BaseId, out BuildEntity buildEntity))
-        {
-            logger.ZLogError($"Trying to update a non-registered build (BaseId: {updateBase.BaseId})");
-            NotifyPlayerDesync(player);
-            operationId = -1;
-            return false;
-        }
-        int deltaOperations = buildEntity.OperationId + 1 - updateBase.OperationId;
-        if (deltaOperations != 0 && options.Value.SafeBuilding)
-        {
-            logger.ZLogWarning($"Ignoring an {nameof(UpdateBase)} packet from [{player.Name}] which is {Math.Abs(deltaOperations) + (deltaOperations > 0 ? " operations ahead" : " operations late")}");
-            NotifyPlayerDesync(player);
-            operationId = -1;
-            return false;
-        }
-
-        worldEntityManager.RemoveGlobalRootEntity(updateBase.FormerGhostId);
-        buildEntity.BaseData = updateBase.BaseData;
-
-        foreach (KeyValuePair<NitroxId, NitroxBaseFace> updatedChild in updateBase.UpdatedChildren)
-        {
-            if (entityRegistry.TryGetEntityById(updatedChild.Key, out InteriorPieceEntity childEntity))
+            if (!entityRegistry.TryGetEntityById<GhostEntity>(updateBase.FormerGhostId, out _))
             {
-                childEntity.BaseFace = updatedChild.Value;
+                logger.ZLogError($"Trying to place a base from a non-registered ghost (GhostId: {updateBase.FormerGhostId})");
+                NotifyPlayerDesync(player);
+                operationId = -1;
+                return false;
             }
-        }
-        foreach (KeyValuePair<NitroxId, NitroxInt3> updatedMoonpool in updateBase.UpdatedMoonpools)
-        {
-            if (entityRegistry.TryGetEntityById(updatedMoonpool.Key, out MoonpoolEntity childEntity))
+            if (!entityRegistry.TryGetEntityById(updateBase.BaseId, out BuildEntity buildEntity))
             {
-                childEntity.Cell = updatedMoonpool.Value;
+                logger.ZLogError($"Trying to update a non-registered build (BaseId: {updateBase.BaseId})");
+                NotifyPlayerDesync(player);
+                operationId = -1;
+                return false;
             }
-        }
-        foreach (KeyValuePair<NitroxId, NitroxInt3> updatedMapRoom in updateBase.UpdatedMapRooms)
-        {
-            if (entityRegistry.TryGetEntityById(updatedMapRoom.Key, out MapRoomEntity childEntity))
+            int deltaOperations = buildEntity.OperationId + 1 - updateBase.OperationId;
+            if (deltaOperations != 0 && options.Value.SafeBuilding)
             {
-                childEntity.Cell = updatedMapRoom.Value;
+                logger.ZLogWarning($"Ignoring an {nameof(UpdateBase)} packet from [{player.Name}] which is {Math.Abs(deltaOperations) + (deltaOperations > 0 ? " operations ahead" : " operations late")}");
+                NotifyPlayerDesync(player);
+                operationId = -1;
+                return false;
             }
-        }
 
-        if (updateBase.BuiltPieceEntity != null && updateBase.BuiltPieceEntity is GlobalRootEntity builtPieceEntity)
-        {
-            worldEntityManager.AddOrUpdateGlobalRootEntity(builtPieceEntity);
-        }
+            worldEntityManager.RemoveGlobalRootEntity(updateBase.FormerGhostId);
+            buildEntity.BaseData = updateBase.BaseData;
 
-        NitroxId transferFromId = updateBase.ChildrenTransfer.Item1;
-        NitroxId transferToId = updateBase.ChildrenTransfer.Item2;
-        if (transferFromId != null && transferToId != null)
-        {
-            // NB: we don't want certain entities to be transferred (e.g. planters)
-            entityRegistry.TransferChildren(transferFromId, transferToId, entity => entity is not PlanterEntity);
-
-            // Edge case for when you place a new water park under another one
-            if (transferFromId == transferToId && entityRegistry.TryGetEntityById(updateBase.ChildrenTransfer.Item1, out InteriorPieceEntity interiorPieceEntity) &&
-                interiorPieceEntity.IsWaterPark)
+            foreach (KeyValuePair<NitroxId, NitroxBaseFace> updatedChild in updateBase.UpdatedChildren)
             {
-                // Cleaning all elements from the planter because plants are not kept in this case
-                CleanPlanterChildren(interiorPieceEntity);
+                if (entityRegistry.TryGetEntityById(updatedChild.Key, out InteriorPieceEntity childEntity))
+                {
+                    childEntity.BaseFace = updatedChild.Value;
+                }
             }
-        }
-
-        // After transferring required children, we need to clean the waterparks that were potentially removed when being merged
-        List<NitroxId> removedChildIds = buildEntity.ChildEntities.OfType<InteriorPieceEntity>()
-            .Where(entity => entity.IsWaterPark).Select(childEntity => childEntity.Id)
-            .Except(updateBase.UpdatedChildren.Keys).ToList();
-
-        foreach (NitroxId removedChildId in removedChildIds)
-        {
-            if (entityRegistry.GetEntityById(removedChildId).HasValue)
+            foreach (KeyValuePair<NitroxId, NitroxInt3> updatedMoonpool in updateBase.UpdatedMoonpools)
             {
-                worldEntityManager.RemoveGlobalRootEntity(removedChildId);
+                if (entityRegistry.TryGetEntityById(updatedMoonpool.Key, out MoonpoolEntity childEntity))
+                {
+                    childEntity.Cell = updatedMoonpool.Value;
+                }
             }
+            foreach (KeyValuePair<NitroxId, NitroxInt3> updatedMapRoom in updateBase.UpdatedMapRooms)
+            {
+                if (entityRegistry.TryGetEntityById(updatedMapRoom.Key, out MapRoomEntity childEntity))
+                {
+                    childEntity.Cell = updatedMapRoom.Value;
+                }
+            }
+
+            if (updateBase.BuiltPieceEntity != null && updateBase.BuiltPieceEntity is GlobalRootEntity builtPieceEntity)
+            {
+                worldEntityManager.AddOrUpdateGlobalRootEntity(builtPieceEntity);
+            }
+
+            NitroxId transferFromId = updateBase.ChildrenTransfer.Item1;
+            NitroxId transferToId = updateBase.ChildrenTransfer.Item2;
+            if (transferFromId != null && transferToId != null)
+            {
+                // NB: we don't want certain entities to be transferred (e.g. planters)
+                entityRegistry.TransferChildren(transferFromId, transferToId, entity => entity is not PlanterEntity);
+
+                // Edge case for when you place a new water park under another one
+                if (transferFromId == transferToId && entityRegistry.TryGetEntityById(updateBase.ChildrenTransfer.Item1, out InteriorPieceEntity interiorPieceEntity) &&
+                    interiorPieceEntity.IsWaterPark)
+                {
+                    // Cleaning all elements from the planter because plants are not kept in this case
+                    CleanPlanterChildren(interiorPieceEntity);
+                }
+            }
+
+            // After transferring required children, we need to clean the waterparks that were potentially removed when being merged
+            List<NitroxId> removedChildIds = buildEntity.ChildEntities.OfType<InteriorPieceEntity>()
+                                                        .Where(entity => entity.IsWaterPark).Select(childEntity => childEntity.Id)
+                                                        .Except(updateBase.UpdatedChildren.Keys).ToList();
+
+            foreach (NitroxId removedChildId in removedChildIds)
+            {
+                if (entityRegistry.GetEntityById(removedChildId).HasValue)
+                {
+                    worldEntityManager.RemoveGlobalRootEntity(removedChildId);
+                }
+            }
+            buildEntity.OperationId++;
+            operationId = buildEntity.OperationId;
+            return true;
         }
-        buildEntity.OperationId++;
-        operationId = buildEntity.OperationId;
-        return true;
     }
 
     /// <summary>
@@ -285,39 +290,43 @@ internal sealed class BuildingManager
 
     public bool ReplacePieceByGhost(Player player, PieceDeconstructed pieceDeconstructed, [NotNullWhen(true)] out Entity? removedEntity, out int operationId)
     {
-        if (!entityRegistry.TryGetEntityById(pieceDeconstructed.BaseId, out BuildEntity buildEntity))
+        // Serialize the read-gate-mutate-increment region on the shared entity-tree lock (see UpdateBase).
+        lock (entityRegistry.TreeLock)
         {
-            logger.ZLogError($"Trying to replace a non-registered build (BaseId: {pieceDeconstructed.BaseId})");
-            removedEntity = null;
-            operationId = -1;
-            return false;
-        }
-        if (entityRegistry.TryGetEntityById(pieceDeconstructed.PieceId, out GhostEntity _))
-        {
-            logger.ZLogError($"Trying to add a ghost to a building but another ghost child with the same id already exists (GhostId: {pieceDeconstructed.PieceId})");
-            removedEntity = null;
-            operationId = -1;
-            return false;
-        }
+            if (!entityRegistry.TryGetEntityById(pieceDeconstructed.BaseId, out BuildEntity buildEntity))
+            {
+                logger.ZLogError($"Trying to replace a non-registered build (BaseId: {pieceDeconstructed.BaseId})");
+                removedEntity = null;
+                operationId = -1;
+                return false;
+            }
+            if (entityRegistry.TryGetEntityById(pieceDeconstructed.PieceId, out GhostEntity _))
+            {
+                logger.ZLogError($"Trying to add a ghost to a building but another ghost child with the same id already exists (GhostId: {pieceDeconstructed.PieceId})");
+                removedEntity = null;
+                operationId = -1;
+                return false;
+            }
 
-        int deltaOperations = buildEntity.OperationId + 1 - pieceDeconstructed.OperationId;
-        if (deltaOperations != 0 && options.Value.SafeBuilding)
-        {
-            logger.ZLogWarning($"Ignoring a {nameof(PieceDeconstructed)} packet from [{player.Name}] which is {Math.Abs(deltaOperations) + (deltaOperations > 0 ? " operations ahead" : " operations late")}");
-            NotifyPlayerDesync(player);
-            removedEntity = null;
-            operationId = -1;
-            return false;
+            int deltaOperations = buildEntity.OperationId + 1 - pieceDeconstructed.OperationId;
+            if (deltaOperations != 0 && options.Value.SafeBuilding)
+            {
+                logger.ZLogWarning($"Ignoring a {nameof(PieceDeconstructed)} packet from [{player.Name}] which is {Math.Abs(deltaOperations) + (deltaOperations > 0 ? " operations ahead" : " operations late")}");
+                NotifyPlayerDesync(player);
+                removedEntity = null;
+                operationId = -1;
+                return false;
+            }
+
+            removedEntity = worldEntityManager.RemoveGlobalRootEntity(pieceDeconstructed.PieceId).Value;
+            GhostEntity ghostEntity = pieceDeconstructed.ReplacerGhost;
+
+            worldEntityManager.AddOrUpdateGlobalRootEntity(ghostEntity);
+            buildEntity.BaseData = pieceDeconstructed.BaseData;
+            buildEntity.OperationId++;
+            operationId = buildEntity.OperationId;
+            return true;
         }
-
-        removedEntity = worldEntityManager.RemoveGlobalRootEntity(pieceDeconstructed.PieceId).Value;
-        GhostEntity ghostEntity = pieceDeconstructed.ReplacerGhost;
-
-        worldEntityManager.AddOrUpdateGlobalRootEntity(ghostEntity);
-        buildEntity.BaseData = pieceDeconstructed.BaseData;
-        buildEntity.OperationId++;
-        operationId = buildEntity.OperationId;
-        return true;
     }
 
     public bool CreateWaterParkPiece(WaterParkDeconstructed waterParkDeconstructed, Entity removedEntity)

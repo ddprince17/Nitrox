@@ -22,12 +22,13 @@ public sealed partial class PipeSurfaceFloater_FixedUpdate_Patch : NitroxPatch, 
      */
     public static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
     {
-        // Insert an instruction right before the Ret
-        return new CodeMatcher(instructions).End()
-                                            .InsertAndAdvance([
-                                                new CodeInstruction(OpCodes.Ldarg_0),
-                                                new CodeInstruction(OpCodes.Call, Reflect.Method(() => StopWatching(default)))
-                                            ]).InstructionEnumeration();
+        // Insert StopWatching right after `this.deployed = true;` (inside the `if (!deployed && y < -0.5f)` block) so
+        // position broadcasting only stops once the floater is actually deployed — not on every FixedUpdate, which
+        // would cut off the descent before deployment.
+        return new CodeMatcher(instructions).MatchStartForward(new CodeMatch(OpCodes.Stfld, Reflect.Field((PipeSurfaceFloater t) => t.deployed)))
+                                            .Advance(1)
+                                            .InsertAndAdvance(new CodeInstruction(OpCodes.Ldarg_0))
+                                            .InsertAndAdvance(new CodeInstruction(OpCodes.Call, Reflect.Method(() => StopWatching(default)))).InstructionEnumeration();
     }
 
     public static void StopWatching(PipeSurfaceFloater pipeSurfaceFloater)

@@ -6,6 +6,6 @@ internal sealed class GoalCompletedProcessor : IAuthPacketProcessor<GoalComplete
 {
     public async Task Process(AuthProcessorContext context, GoalCompleted packet)
     {
-        context.Sender.PersonalCompletedGoalsWithTimestamp.Add(packet.CompletedGoal, packet.CompletionTime);
+        context.Sender.PersonalCompletedGoalsWithTimestamp[packet.CompletedGoal] = packet.CompletionTime;
     }
 }

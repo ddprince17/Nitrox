@@ -20,6 +20,9 @@ internal sealed class FMODEventInstanceProcessor(PlayerManager playerManager, Fm
             return;
         }
 
+        // Capture the source volume once: CalculateVolume must always attenuate from it, never from the
+        // previous recipient's already-attenuated value (which is the same mutated packet instance).
+        float sourceVolume = packet.Volume;
         foreach (Player player in playerManager.GetConnectedPlayers())
         {
             float distance = NitroxVector3.Distance(player.Position, packet.Position);
@@ -27,7 +30,7 @@ internal sealed class FMODEventInstanceProcessor(PlayerManager playerManager, Fm
                 (soundData.IsGlobal || player.SubRootId.Equals(context.Sender.SubRootId)) &&
                 distance < soundData.Radius)
             {
-                packet.Volume = SoundHelper.CalculateVolume(distance, soundData.Radius, packet.Volume);
+                packet.Volume = SoundHelper.CalculateVolume(distance, soundData.Radius, sourceVolume);
                 await context.SendAsync(packet, player.SessionId);
             }
         }

@@ -31,7 +31,10 @@ internal sealed class WorldEntityManager
     /// </summary>
     internal Dictionary<NitroxId, GlobalRootEntity> globalRootEntitiesById = [];
 
-    private readonly Lock globalRootEntitiesLock = new();
+    // Global-root entity bookkeeping is guarded by the shared entity-tree lock (EntityRegistry.TreeLock) because these
+    // operations mutate the entity hierarchy via entityRegistry; using the same lock keeps the dictionary update and the
+    // tree mutation atomic and consistent with every other tree mutator. The worldEntitiesLock below is an independent
+    // concern (cell tracking) and is never nested with the tree lock, so there is no lock-ordering deadlock.
     private readonly ILogger<WorldEntityManager> logger;
     private readonly PlayerManager playerManager;
 
@@ -63,7 +66,7 @@ internal sealed class WorldEntityManager
 
     public List<T> GetGlobalRootEntities<T>() where T : GlobalRootEntity
     {
-        lock (globalRootEntitiesLock)
+        lock (entityRegistry.TreeLock)
         {
             return new(globalRootEntitiesById.Values.OfType<T>());
         }
@@ -136,7 +139,7 @@ internal sealed class WorldEntityManager
     public Optional<Entity> RemoveGlobalRootEntity(NitroxId entityId, bool removeFromRegistry = true)
     {
         Optional<Entity> removedEntity = Optional.Empty;
-        lock (globalRootEntitiesLock)
+        lock (entityRegistry.TreeLock)
         {
             if (removeFromRegistry)
             {
@@ -326,7 +329,7 @@ internal sealed class WorldEntityManager
     /// </summary>
     public void AddOrUpdateGlobalRootEntity(GlobalRootEntity entity, bool addOrUpdateRegistry = true)
     {
-        lock (globalRootEntitiesLock)
+        lock (entityRegistry.TreeLock)
         {
             if (addOrUpdateRegistry)
             {

@@ -22,7 +22,7 @@ public sealed partial class Floater_FixedUpdate_Patch : NitroxPatch, IDynamicPat
 
         // For now we only check for vehicles which are our main concern but in the future when we properly sync floaters,
         // we'll extend the check to all entities
-        if (!connectedBody.GetComponent<Vehicle>() || !connectedBody.GetComponent<NitroxCyclops>())
+        if (!connectedBody.GetComponent<Vehicle>() && !connectedBody.GetComponent<NitroxCyclops>())
         {
             return true;
         }

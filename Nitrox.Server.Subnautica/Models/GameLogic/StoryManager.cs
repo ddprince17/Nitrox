@@ -153,12 +153,13 @@ internal sealed class StoryManager : ISummarize
 
     public bool RemovedLatestRadioMessage()
     {
-        if (StoryGoalData.RadioQueue.Count <= 0)
+        // Atomic dequeue: two concurrent RadioPlayPendingMessage packets must not both pass a Count check and then have
+        // the second Dequeue throw InvalidOperationException on an empty queue.
+        if (!StoryGoalData.RadioQueue.TryDequeue(out string message))
         {
             return false;
         }
 
-        string message = StoryGoalData.RadioQueue.Dequeue();
         // Just like StoryGoalManager.ExecutePendingRadioMessage
         StoryGoalData.CompletedGoals.Add($"OnPlay{message}");
 

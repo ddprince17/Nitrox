@@ -9,7 +9,7 @@ public sealed partial class CyclopsDecoyLaunchButton_OnClick_Patch : NitroxPatch
 {
     public static readonly MethodInfo TARGET_METHOD = Reflect.Method((CyclopsDecoyLaunchButton t) => t.OnClick());
 
-    public static void Postfix(CyclopsHornButton __instance)
+    public static void Postfix(CyclopsDecoyLaunchButton __instance)
     {
         if (__instance.subRoot.TryGetIdOrWarn(out NitroxId id))
         {

@@ -56,11 +56,12 @@ public sealed partial class PDAScanner_Scan_Patch : NitroxPatch, IDynamicPatch
         // In the case the player has already fully researched the target
         if (alreadyComplete)
         {
-            // In the case that the target is destroyable, the player is given 2 titanium and the object is destroyed
-            // We want to broadcast the destruction event before the object is destroyed and corresponding scan data is invalidated.
+            // Only broadcast destruction when the game itself destroys the target (destroyAfterScan). An already-complete
+            // but non-destroyable target (e.g. a re-scanned creature whose encyclopedia entry is still missing) must NOT
+            // be destroyed on remote clients/server, which hard-coding destroy=true here previously caused.
             if (scanTarget.hasUID)
             {
-                PDAScanFinished packet = new(new(scanTarget.uid), techType.ToDto(), entryData.totalFragments, true, true, true);
+                PDAScanFinished packet = new(new(scanTarget.uid), techType.ToDto(), entryData.totalFragments, true, entryData.destroyAfterScan, true);
                 Resolve<IPacketSender>().Send(packet);
             }
             return;

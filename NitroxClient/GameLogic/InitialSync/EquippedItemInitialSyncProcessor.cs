@@ -32,7 +32,14 @@ public sealed class EquippedItemInitialSyncProcessor : InitialSyncProcessor
 
                 waitScreenItem.SetProgress(totalEquippedItemsDone, packet.EquippedItems.Count);
 
-                GameObject gameObject = NitroxEntity.RequireObjectFrom(id);
+                if (!NitroxEntity.TryGetObjectFrom(id, out GameObject gameObject))
+                {
+                    // The equipped item entity failed to spawn (SpawnBatchAsync is best-effort and logs+continues
+                    // on spawner errors); skip it instead of throwing and aborting the entire initial sync.
+                    Log.Warn($"Equipped item {id} for slot {slot} was not spawned; skipping.");
+                    totalEquippedItemsDone++;
+                    continue;
+                }
                 Pickupable pickupable = gameObject.RequireComponent<Pickupable>();
 
                 GameObject player = Player.mainObject;

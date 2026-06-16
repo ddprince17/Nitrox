@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.Serialization;
 using Newtonsoft.Json;
 using ProtoBufNet;
@@ -115,6 +116,25 @@ public class ThreadSafeQueue<T> : IReadOnlyCollection<T>, ICollection
         lock (locker)
         {
             return queue.Dequeue();
+        }
+    }
+
+    /// <summary>
+    ///     Atomically dequeues the front item if the queue is non-empty. Use instead of a separate <see cref="Count" />
+    ///     check followed by <see cref="Dequeue" />, which is not atomic and throws <see cref="InvalidOperationException" />
+    ///     if another thread drains the queue in between.
+    /// </summary>
+    public bool TryDequeue([MaybeNullWhen(false)] out T item)
+    {
+        lock (locker)
+        {
+            if (queue.Count == 0)
+            {
+                item = default;
+                return false;
+            }
+            item = queue.Dequeue();
+            return true;
         }
     }
 

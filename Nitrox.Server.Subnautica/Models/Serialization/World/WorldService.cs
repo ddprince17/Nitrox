@@ -81,18 +81,24 @@ internal class WorldService : IHostedService
 
     public bool Save(string saveDir)
     {
-        PersistedWorldData persistedWorld = new()
+        // The persisted DTOs wrap the live Entity objects and the serializer walks their ChildEntities lists; hold the
+        // shared entity-tree lock across both building the snapshot and serializing it so concurrent packet threads can't
+        // mutate the tree mid-save (which previously threw "Collection was modified" and silently failed the autosave).
+        lock (entityRegistry.TreeLock)
         {
-            WorldData = new()
+            PersistedWorldData persistedWorld = new()
             {
-                ParsedBatchCells = batchEntitySpawner.SerializableParsedBatches,
-                GameData = GameData.From(pdaManager, storyManager.StoryGoalData, storyScheduler, storyManager, timeService)
-            },
-            PlayerData = PlayerData.From(playerManager.GetAllPlayers()),
-            GlobalRootData = GlobalRootData.From(worldEntityManager.GetPersistentGlobalRootEntities()),
-            EntityData = EntityData.From(entityRegistry.GetAllEntities(true))
-        };
-        return Save(persistedWorld, saveDir);
+                WorldData = new()
+                {
+                    ParsedBatchCells = batchEntitySpawner.SerializableParsedBatches,
+                    GameData = GameData.From(pdaManager, storyManager.StoryGoalData, storyScheduler, storyManager, timeService)
+                },
+                PlayerData = PlayerData.From(playerManager.GetAllPlayers()),
+                GlobalRootData = GlobalRootData.From(worldEntityManager.GetPersistentGlobalRootEntities()),
+                EntityData = EntityData.From(entityRegistry.GetAllEntities(true))
+            };
+            return Save(persistedWorld, saveDir);
+        }
     }
 
     public async Task StartAsync(CancellationToken cancellationToken)

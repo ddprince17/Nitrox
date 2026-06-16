@@ -13,6 +13,16 @@ namespace Nitrox.Server.Subnautica.Models.GameLogic.Entities
         private readonly ILogger<EntityRegistry> logger = logger;
         private readonly ConcurrentDictionary<NitroxId, Entity> entitiesById = new();
 
+        /// <summary>
+        ///     Guards all structural mutations of the entity hierarchy (each <see cref="Entity.ChildEntities" /> list and
+        ///     <see cref="Entity.ParentId" />). <see cref="entitiesById" /> is concurrent, but the parent/child lists are plain
+        ///     <see cref="List{T}" />s, so packet-handler threads (which run concurrently) would otherwise corrupt them.
+        ///     This is a single, re-entrant lock shared by every path that mutates the tree (this class,
+        ///     <c>WorldEntityManager</c>, <c>BuildingManager</c>) and by the world-save snapshot, so the entire entity graph
+        ///     has one consistent ordering and cannot deadlock against itself.
+        /// </summary>
+        public Lock TreeLock { get; } = new();
+
         public Optional<T> GetEntityById<T>(NitroxId id) where T : Entity
         {
             TryGetEntityById(id, out T entity);
@@ -42,7 +52,7 @@ namespace Nitrox.Server.Subnautica.Models.GameLogic.Entities
             {
                 return new(entitiesById.Values.Where(entity => entity is not GlobalRootEntity));
             }
-            return new List<Entity>(entitiesById.Values);            
+            return new List<Entity>(entitiesById.Values);
         }
 
         public List<Entity> GetEntities(List<NitroxId> ids)
@@ -73,75 +83,90 @@ namespace Nitrox.Server.Subnautica.Models.GameLogic.Entities
         /// </summary>
         public void AddOrUpdate(Entity entity)
         {
-            if (!entitiesById.TryAdd(entity.Id, entity))
+            lock (TreeLock)
             {
-                Entity current = entitiesById[entity.Id];
+                if (!entitiesById.TryAdd(entity.Id, entity))
+                {
+                    Entity current = entitiesById[entity.Id];
 
-                RemoveFromParent(current);
+                    RemoveFromParent(current);
 
-                entitiesById.TryUpdate(entity.Id, entity, current);
+                    entitiesById.TryUpdate(entity.Id, entity, current);
+                }
+
+                AddToParent(entity);
+                AddEntitiesIgnoringDuplicate(entity.ChildEntities);
             }
-
-            AddToParent(entity);
-            AddEntitiesIgnoringDuplicate(entity.ChildEntities);
         }
 
         public void AddEntities(IEnumerable<Entity> entities)
         {
-            foreach(Entity entity in entities)
+            lock (TreeLock)
             {
-                AddEntity(entity);
+                foreach (Entity entity in entities)
+                {
+                    AddEntity(entity);
+                }
             }
         }
 
         /// <summary>
         /// Used for situations when some children may be new but others may not be. For
-        /// example a dropped InventoryEntity turns into a WorldEntity but keeps its 
-        /// battery inside (already known). 
+        /// example a dropped InventoryEntity turns into a WorldEntity but keeps its
+        /// battery inside (already known).
         /// </summary>
         /// <remarks>
         /// Updates entities if they already exist
         /// </remarks>
         public void AddEntitiesIgnoringDuplicate(IEnumerable<Entity> entities)
         {
-            foreach (Entity entity in entities)
+            lock (TreeLock)
             {
-                if (entitiesById.TryGetValue(entity.Id, out Entity currentEntity))
+                foreach (Entity entity in entities)
                 {
-                    entitiesById.TryUpdate(entity.Id, entity, currentEntity);
+                    if (entitiesById.TryGetValue(entity.Id, out Entity currentEntity))
+                    {
+                        entitiesById.TryUpdate(entity.Id, entity, currentEntity);
+                    }
+                    else
+                    {
+                        entitiesById.TryAdd(entity.Id, entity);
+                    }
+                    AddEntitiesIgnoringDuplicate(entity.ChildEntities);
                 }
-                else
-                {
-                    entitiesById.TryAdd(entity.Id, entity);
-                }
-                AddEntitiesIgnoringDuplicate(entity.ChildEntities);
             }
         }
 
         public Optional<Entity> RemoveEntity(NitroxId id)
         {
-            if (entitiesById.TryRemove(id, out Entity entity))
+            lock (TreeLock)
             {
-                RemoveFromParent(entity);
-
-                foreach (Entity child in entity.ChildEntities)
+                if (entitiesById.TryRemove(id, out Entity entity))
                 {
-                    RemoveEntity(child.Id);
-                }
-            }
+                    RemoveFromParent(entity);
 
-            return Optional.OfNullable(entity);
+                    foreach (Entity child in entity.ChildEntities)
+                    {
+                        RemoveEntity(child.Id);
+                    }
+                }
+
+                return Optional.OfNullable(entity);
+            }
         }
 
         public void AddToParent(Entity entity)
         {
-            if (entity.ParentId != null)
+            lock (TreeLock)
             {
-                Optional<Entity> parent = GetEntityById(entity.ParentId);
-
-                if (parent.HasValue)
+                if (entity.ParentId != null)
                 {
-                    parent.Value.ChildEntities.Add(entity);
+                    Optional<Entity> parent = GetEntityById(entity.ParentId);
+
+                    if (parent.HasValue)
+                    {
+                        parent.Value.ChildEntities.Add(entity);
+                    }
                 }
             }
         }
@@ -153,13 +178,16 @@ namespace Nitrox.Server.Subnautica.Models.GameLogic.Entities
                 return;
             }
 
-            if (entity.ParentId != null && TryGetEntityById(entity.ParentId, out Entity parentEntity))
+            lock (TreeLock)
             {
-                parentEntity.ChildEntities.RemoveAll(childEntity => childEntity.Id.Equals(entity.Id));
-                entity.ParentId = null;
-                if (entity is WorldEntity worldEntity && worldEntity.Transform != null)
+                if (entity.ParentId != null && TryGetEntityById(entity.ParentId, out Entity parentEntity))
                 {
-                    worldEntity.Transform.SetParent(null, true);
+                    parentEntity.ChildEntities.RemoveAll(childEntity => childEntity.Id.Equals(entity.Id));
+                    entity.ParentId = null;
+                    if (entity is WorldEntity { Transform: not null } worldEntity)
+                    {
+                        worldEntity.Transform.SetParent(null, true);
+                    }
                 }
             }
         }
@@ -170,9 +198,12 @@ namespace Nitrox.Server.Subnautica.Models.GameLogic.Entities
         /// </summary>
         public void CleanChildren(Entity entity)
         {
-            for (int i = entity.ChildEntities.Count - 1; i >= 0; i--)
+            lock (TreeLock)
             {
-                RemoveEntity(entity.ChildEntities[i].Id);
+                for (int i = entity.ChildEntities.Count - 1; i >= 0; i--)
+                {
+                    RemoveEntity(entity.ChildEntities[i].Id);
+                }
             }
         }
 
@@ -204,18 +235,21 @@ namespace Nitrox.Server.Subnautica.Models.GameLogic.Entities
 
         public void ReparentEntity(Entity? entity, Entity? newParent)
         {
-            RemoveFromParent(entity);
-            if (newParent == null)
+            lock (TreeLock)
             {
-                return;
+                RemoveFromParent(entity);
+                if (newParent == null)
+                {
+                    return;
+                }
+                if (entity is WorldEntity { Transform: not null } worldEntity &&
+                    newParent is WorldEntity { Transform: not null } parentWorldEntity)
+                {
+                    worldEntity.Transform.SetParent(parentWorldEntity.Transform, true);
+                }
+                entity?.ParentId = newParent.Id;
+                newParent.ChildEntities.Add(entity);
             }
-            if (entity is WorldEntity worldEntity && worldEntity.Transform != null &&
-                newParent is WorldEntity parentWorldEntity && parentWorldEntity.Transform != null)
-            {
-                worldEntity.Transform.SetParent(parentWorldEntity.Transform, true);
-            }
-            entity.ParentId = newParent.Id;
-            newParent.ChildEntities.Add(entity);
         }
 
         public void TransferChildren(NitroxId parentId, NitroxId newParentId, Func<Entity, bool> filter = null)
@@ -235,16 +269,19 @@ namespace Nitrox.Server.Subnautica.Models.GameLogic.Entities
 
         public void TransferChildren(Entity parent, Entity newParent, Func<Entity, bool> filter = null)
         {
-            List<Entity> childrenToMove = filter != null ?
-                [.. parent.ChildEntities.Where(filter)] : parent.ChildEntities;
-
-            // In case parent == newParent (which is actually a case used) we need removal to happen before adding the entities back
-            parent.ChildEntities.RemoveAll(entity => filter(entity));
-
-            foreach (Entity childEntity in childrenToMove)
+            lock (TreeLock)
             {
-                childEntity.ParentId = newParent.Id;
-                newParent.ChildEntities.Add(childEntity);
+                List<Entity> childrenToMove = filter != null ?
+                    [.. parent.ChildEntities.Where(filter)] : parent.ChildEntities;
+
+                // In case parent == newParent (which is actually a case used) we need removal to happen before adding the entities back
+                parent.ChildEntities.RemoveAll(entity => filter != null && filter(entity));
+
+                foreach (Entity childEntity in childrenToMove)
+                {
+                    childEntity.ParentId = newParent.Id;
+                    newParent.ChildEntities.Add(childEntity);
+                }
             }
         }
     }

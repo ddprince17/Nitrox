@@ -60,6 +60,8 @@ public sealed partial class Vehicle_TorpedoShot_Patch : NitroxPatch, IDynamicPat
         // In Bullet.Shoot, _consumption = f(lifeTime), lifeTime = g(_consumption), this is g:
         float lifeTime = seamothTorpedo._consumption > 0 ? 1f / seamothTorpedo._consumption : 0f;
 
-        Resolve<IPacketSender>().Send(new TorpedoShot(bulletId, torpedoType.techType.ToDto(), position, rotation, seamothTorpedo.speed, lifeTime));
+        // Send the actual fired speed (this.speed + muzzle velocity dot), not the bare `speed` field. The receiver's
+        // SeamothTorpedo.Shoot override re-adds this.speed, so it must compensate for this value (see BulletManager).
+        Resolve<IPacketSender>().Send(new TorpedoShot(bulletId, torpedoType.techType.ToDto(), position, rotation, seamothTorpedo.currentSpeed, lifeTime));
     }
 }

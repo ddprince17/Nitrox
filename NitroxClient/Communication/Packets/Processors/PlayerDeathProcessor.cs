@@ -1,4 +1,4 @@
-using Nitrox.Model.Helper;
+using Nitrox.Model.DataStructures;
 using Nitrox.Model.Subnautica.Packets;
 using NitroxClient.Communication.Packets.Processors.Core;
 using NitroxClient.GameLogic;
@@ -11,7 +11,15 @@ internal sealed class PlayerDeathProcessor(PlayerManager playerManager) : IClien
 
     public Task Process(ClientProcessorContext context, PlayerDeathEvent playerDeath)
     {
-        RemotePlayer player = Validate.IsPresent(playerManager.Find(playerDeath.SessionId));
+        // A death packet can race the dying player's disconnect or arrive before registration; ignore if absent
+        // (matches the guarded pattern used by the other player processors) instead of throwing.
+        Optional<RemotePlayer> optionalPlayer = playerManager.Find(playerDeath.SessionId);
+        if (!optionalPlayer.HasValue)
+        {
+            Log.Warn($"Received {nameof(PlayerDeathEvent)} for unknown player {playerDeath.SessionId}");
+            return Task.CompletedTask;
+        }
+        RemotePlayer player = optionalPlayer.Value;
         Log.Debug($"{player.PlayerName} died");
         Log.InGame(Language.main.Get("Nitrox_PlayerDied").Replace("{PLAYER}", player.PlayerName));
         player.PlayerDeathEvent.Trigger(player);

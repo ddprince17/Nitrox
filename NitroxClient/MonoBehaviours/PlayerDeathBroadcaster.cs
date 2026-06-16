@@ -21,7 +21,8 @@ public class PlayerDeathBroadcaster : MonoBehaviour
         {
             DeathBeacon.SpawnDeathBeacon(player.transform.position.ToDto(), localPlayer.PlayerName);
         }
-        localPlayer.BroadcastDeath(player.transform.position);
+        // Death is broadcast from Player_OnKill_Patch.Postfix instead: this handler (playerDeathEvent) does not fire in
+        // permadeath/hardcore mode, where Player.ResetPlayerOnDeath ends the game before triggering the event.
     }
 
     public void OnDestroy()

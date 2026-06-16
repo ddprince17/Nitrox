@@ -911,7 +911,7 @@ event:/sub/seamoth/seamoth_loop_rpm;false;false;90
 event:/sub/seamoth/seamoth_rev_up;false;false;75
 event:/sub/seamoth/seamoth_stop;false;false;0
 event:/sub/seamoth/select;false;false;0
-event:/sub/seamoth/sonar_loop;false;false;0
+event:/sub/seamoth/sonar_loop;true;true;80
 event:/sub/seamoth/sparks;false;false;0
 event:/sub/seamoth/storage_close;false;false;0
 event:/sub/seamoth/storage_open;false;false;0

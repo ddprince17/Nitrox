@@ -14,7 +14,7 @@ public sealed partial class Stalker_CheckLoseTooth_Patch : NitroxPatch, IDynamic
     public static bool Prefix(Stalker __instance, GameObject target)
     {
         if (!__instance.TryGetNitroxId(out NitroxId creatureId)
-            && !Resolve<SimulationOwnership>().HasAnyLockType(creatureId))
+            || !Resolve<SimulationOwnership>().HasAnyLockType(creatureId))
         {
             return false;
         }

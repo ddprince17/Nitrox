@@ -138,7 +138,14 @@ public class FMODEmitterController : MonoBehaviour
 
     public void PlayCustomLoopingEmitter(string path)
     {
-        (FMOD_CustomLoopingEmitter loopingEmitter, bool is3D, float radius) = loopingEmitters[path];
+        // The send-side patches transmit whenever the start/stop asset is whitelisted, but an entry is only
+        // registered here when the parent emitter's base asset is whitelisted AND 3D. Guard the mismatch instead
+        // of throwing KeyNotFoundException (matches the other Play/Stop methods which use TryGetValue).
+        if (!loopingEmitters.TryGetValue(path, out Tuple<FMOD_CustomLoopingEmitter, bool, float> entry))
+        {
+            return;
+        }
+        (FMOD_CustomLoopingEmitter loopingEmitter, bool is3D, float radius) = entry;
         EventInstance eventInstance = FMODUWE.GetEventImpl(path);
 
         if (is3D)

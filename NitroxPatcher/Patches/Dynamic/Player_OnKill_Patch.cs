@@ -3,6 +3,7 @@ using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
 using HarmonyLib;
+using NitroxClient.GameLogic;
 
 namespace NitroxPatcher.Patches.Dynamic;
 
@@ -15,15 +16,8 @@ public sealed partial class Player_OnKill_Patch : NitroxPatch, IDynamicPatch
     public static IEnumerable<CodeInstruction> Transpiler(MethodBase original, IEnumerable<CodeInstruction> instructions)
     {
         List<CodeInstruction> instructionList = instructions.ToList();
-        /**
-        * Skips
-        * if (GameModeUtils.IsPermadeath())
-        * {
-        *      SaveLoadManager.main.ClearSlotAsync(SaveLoadManager.main.GetCurrentSlot());
-        *      this.EndGame();
-        *      return;
-        * }
-        */
+        // Forces GameModeUtils.IsPermadeath() to false inside OnKill so the local client skips
+        // SaveLoadManager.ClearSlotAsync (the only thing in OnKill's permadeath branch); ResetPlayerOnDeath still ends the game.
         for (int i = 0; i < instructionList.Count; i++)
         {
             CodeInstruction instr = instructionList[i];
@@ -39,5 +33,13 @@ public sealed partial class Player_OnKill_Patch : NitroxPatch, IDynamicPatch
                 yield return instr;
             }
         }
+    }
+
+    // Player.OnKill always runs on death, whereas playerDeathEvent (which PlayerDeathBroadcaster listens on) is NOT
+    // triggered in permadeath/hardcore: Player.ResetPlayerOnDeath calls EndGame() and yield-breaks before Trigger.
+    // Broadcasting here ensures remote players are notified and the server marks hardcore players dead in every mode.
+    public static void Postfix(Player __instance)
+    {
+        Resolve<LocalPlayer>().BroadcastDeath(__instance.transform.position);
     }
 }

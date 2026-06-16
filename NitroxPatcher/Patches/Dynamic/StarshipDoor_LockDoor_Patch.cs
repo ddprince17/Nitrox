@@ -13,7 +13,8 @@ public sealed partial class StarshipDoor_LockDoor_Patch : NitroxPatch, IDynamicP
     {
         if (!__instance.doorLocked && __instance.TryGetIdOrWarn(out NitroxId id))
         {
-            StarshipDoorMetadata starshipDoorMetadata = new(__instance.doorLocked, __instance.doorOpen);
+            // LockDoor() sets doorLocked = true after this Prefix; broadcast the post-call (locked) state.
+            StarshipDoorMetadata starshipDoorMetadata = new(true, __instance.doorOpen);
             Resolve<Entities>().BroadcastMetadataUpdate(id, starshipDoorMetadata);
         }
     }

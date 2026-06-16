@@ -21,7 +21,7 @@ internal sealed class MutePlayerProcessor(PlayerManager playerManager) : IClient
         {
             player.Value.PlayerContext.IsMuted = packet.Muted;
         }
-        OnPlayerMuted(packet.SessionId, packet.Muted);
+        OnPlayerMuted?.Invoke(packet.SessionId, packet.Muted);
         return Task.CompletedTask;
     }
 }

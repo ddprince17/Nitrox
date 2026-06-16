@@ -48,9 +48,11 @@ public class BulletManager
         // We mark it to be able to ignore events from remote bullets
         torpedoClone.AddComponent<RemotePlayerBullet>();
 
-        // We cast it to Bullet to ensure we're calling the same method as in Vehicle.TorpedoShot
-        Bullet seamothTorpedo = torpedoClone.GetComponent<SeamothTorpedo>();
-        seamothTorpedo.Shoot(position, rotation, speed, lifeTime);
+        // SeamothTorpedo.Shoot overrides Bullet.Shoot and re-adds its own `speed` field (base.Shoot(.., this.speed + speed, ..)).
+        // The packet carries the actual fired speed (Bullet.currentSpeed from the sender), so subtract the field here to
+        // cancel the re-add and avoid the torpedo travelling at double speed on remote clients.
+        SeamothTorpedo seamothTorpedo = torpedoClone.GetComponent<SeamothTorpedo>();
+        seamothTorpedo.Shoot(position, rotation, speed - seamothTorpedo.speed, lifeTime);
     }
 
     public void TorpedoHit(NitroxId bulletId, Vector3 position, Quaternion rotation)
