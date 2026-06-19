@@ -467,7 +467,7 @@ internal partial class UpdatesViewModel(NitroxWebsiteApiService nitroxWebsiteApi
 
         try
         {
-            OpenDirectory(backupsDir);
+            OpenPath(backupsDir);
         }
         catch (Exception ex)
         {

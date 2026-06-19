@@ -123,7 +123,7 @@ internal partial class ManageServerViewModel : RoutableViewModelBase
     [NotifyDataErrorInfo]
     [NitroxWorldSeed]
     public partial string? ServerSeed { get; set; }
-    public static Array PlayerPerms => Enum.GetValues(typeof(Perms));
+    public static Array PlayerPerms => Enum.GetValues(typeof(Perms)).OfType<Perms>().Distinct().ToArray();
     public string? OriginalServerName => Server?.Name;
 
     private string SaveFolderDirectory => Path.Combine(SavesFolderDir, Server?.Name ?? throw new Exception($"{nameof(Server)} is not set"));
@@ -381,7 +381,7 @@ internal partial class ManageServerViewModel : RoutableViewModelBase
     }
 
     [RelayCommand]
-    private void OpenWorldFolder() => OpenDirectory(SaveFolderDirectory);
+    private void OpenWorldFolder() => OpenPath(SaveFolderDirectory);
 
     [RelayCommand(CanExecute = nameof(CanRestoreBackup))]
     private async Task RestoreBackup()
