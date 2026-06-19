@@ -76,11 +76,8 @@ public class InteriorPieceEntitySpawner : EntitySpawner<InteriorPieceEntity>
 
         yield return entities.SpawnBatchAsync(batch, true);
 
-        if (result.Get().Value.TryGetComponent(out PowerSource powerSource))
-        {
-            // TODO: Have synced/restored power
-            powerSource.SetPower(powerSource.maxPower);
-        }
+        // Power is restored from synced PowerSourceMetadata (PowerSource_ModifyPower_Patch / PowerSourceMetadataProcessor)
+        // rather than forced to full here, so a drained base no longer shows full after reload/join.
     }
 
     protected override bool SpawnsOwnChildren(InteriorPieceEntity entity) => true;

@@ -53,11 +53,8 @@ public class ModuleEntitySpawner : EntitySpawner<ModuleEntity>
             yield return entities.SpawnBatchAsync(entity.ChildEntities.OfType<InstalledModuleEntity>().ToList<Entity>(), true);
         }
         
-        if (moduleObject.TryGetComponent(out PowerSource powerSource))
-        {
-            // TODO: Have synced/restored power
-            powerSource.SetPower(powerSource.maxPower);
-        }
+        // Power is restored from synced PowerSourceMetadata (PowerSource_ModifyPower_Patch / PowerSourceMetadataProcessor)
+        // rather than forced to full here, so a drained module no longer shows full after reload/join.
     }
 
     protected override bool SpawnsOwnChildren(ModuleEntity entity) => true;
