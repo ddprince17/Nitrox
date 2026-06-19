@@ -6,6 +6,7 @@ using HarmonyLib;
 using NitroxClient.GameLogic;
 using Nitrox.Model.Core;
 using Nitrox.Model.DataStructures;
+using Nitrox.Model.Subnautica.DataStructures.GameLogic.Entities.Metadata;
 
 namespace NitroxPatcher.Patches.Dynamic;
 
@@ -77,6 +78,15 @@ public sealed partial class Welder_Weld_Patch : NitroxPatch, IDynamicPatch
             else
             {
                 result = live.AddHealth(addHealth);
+
+                // Sync incremental weld progress for repairable wall panels (a non-vehicle LiveMixin) so other players see
+                // the repair animation advance during welding, instead of only the final fully-repaired state broadcast by
+                // WeldableWallPanelGeneric_UnlockDoor_Patch. Throttled because Weld() ticks rapidly.
+                WeldableWallPanelGeneric panel = live.GetComponentInParent<WeldableWallPanelGeneric>();
+                if (panel && panel.TryGetIdOrWarn(out NitroxId panelId))
+                {
+                    Resolve<Entities>().BroadcastMetadataUpdateThrottled(panelId, new WeldableWallPanelGenericMetadata(live.health));
+                }
             }
         }
         return result;

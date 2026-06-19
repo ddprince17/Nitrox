@@ -24,7 +24,10 @@ namespace NitroxClient.GameLogic
             if (techType == TechType.SeamothElectricalDefense)
             {
                 Transform aimingTransform = Player.main.camRoot.GetAimingTransform();
-                SeamothModulesAction changed = new SeamothModulesAction(techType.ToDto(), slotID, id, aimingTransform.forward.ToDto(), aimingTransform.rotation.ToDto());
+                // Capture the firer's charge now (before the original consumes it) so observers reproduce the same burst intensity.
+                float charge = instance.quickSlotCharge[slotID];
+                float chargeScalar = instance.GetSlotCharge(slotID);
+                SeamothModulesAction changed = new SeamothModulesAction(techType.ToDto(), slotID, id, aimingTransform.forward.ToDto(), aimingTransform.rotation.ToDto(), charge, chargeScalar);
                 packetSender.Send(changed);
             }
         }

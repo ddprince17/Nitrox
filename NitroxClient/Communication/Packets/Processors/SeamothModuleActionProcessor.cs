@@ -21,14 +21,12 @@ internal sealed class SeamothModuleActionProcessor : IClientPacketProcessor<Seam
             {
                 case TechType.SeamothElectricalDefense:
                 {
-                    float[] chargeArray = seamoth.quickSlotCharge;
-                    float charge = chargeArray[packet.SlotID];
-                    float slotCharge = seamoth.GetSlotCharge(packet.SlotID);
-
+                    // Use the firer's transmitted charge: the observer's local quickSlotCharge for a remote SeaMoth is
+                    // always 0 (slot charging is local-input-only), which previously produced a minimum-intensity burst.
                     GameObject gameObject = Utils.SpawnZeroedAt(seamoth.seamothElectricalDefensePrefab, seamoth.transform);
                     ElectricalDefense component = gameObject.GetComponent<ElectricalDefense>();
-                    component.charge = charge;
-                    component.chargeScalar = slotCharge;
+                    component.charge = packet.Charge;
+                    component.chargeScalar = packet.ChargeScalar;
                     component.defenseSound = null; // Disable sound in Start(). Sound is synced over general Nitrox FMOD system.
                     break;
                 }
