@@ -1,0 +1,165 @@
+name: Release
+
+# Publishes, on every push to master:
+#   - a self-contained Windows launcher zip   (the full Nitrox package the launcher auto-updater installs)
+#   - a self-contained Windows server zip
+#   - a Docker server image pushed to GHCR
+#   - a GitHub Release (tagged with the GitVersion version) the launcher detects as an update source
+#
+# Required repository secrets:
+#   STEAM_USERNAME / STEAM_PASSWORD  -> a Steam account that OWNS Subnautica (used by SteamCMD to fetch the game
+#                                       files needed to COMPILE Nitrox). The account should have Steam Guard handled
+#                                       (dedicated account with Steam Guard disabled, or a long-lived session).
+# GITHUB_TOKEN is provided automatically (used for GHCR push + creating the release).
+
+on:
+  push:
+    branches: [master]
+
+permissions:
+  contents: write   # create the GitHub Release + tag
+  packages: write   # push the image to GHCR
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  SUBNAUTICA_APPID: "264710"
+  GAME_DIR: ${{ github.workspace }}/game
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.compute.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # GitVersion needs full history
+      - name: Install GitVersion
+        uses: gittools/actions/gitversion/setup@v3
+        with:
+          versionSpec: "6.x"
+      - name: Run GitVersion
+        id: gitversion
+        uses: gittools/actions/gitversion/execute@v3
+      - name: Compute 4-part version
+        id: compute
+        run: echo "version=${{ steps.gitversion.outputs.majorMinorPatch }}.${{ steps.gitversion.outputs.commitsSinceVersionSource }}" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: version
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.x"
+
+      # --- Acquire Subnautica via SteamCMD (game files are required at COMPILE time) ---
+      - name: Cache Subnautica game files
+        id: game-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.GAME_DIR }}
+          # Bump the suffix to force a re-download after a Subnautica update.
+          key: subnautica-windepot-v1
+      - name: Download Subnautica (SteamCMD)
+        if: steps.game-cache.outputs.cache-hit != 'true'
+        env:
+          STEAM_USERNAME: ${{ secrets.STEAM_USERNAME }}
+          STEAM_PASSWORD: ${{ secrets.STEAM_PASSWORD }}
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ca-certificates curl tar lib32gcc-s1
+          mkdir -p "$RUNNER_TEMP/steamcmd" && cd "$RUNNER_TEMP/steamcmd"
+          curl -sqL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | tar zxvf -
+          # Force the Windows depot so the managed Assembly-CSharp.dll (etc.) Nitrox references are present.
+          ./steamcmd.sh +force_install_dir "$GAME_DIR" \
+                        +login "$STEAM_USERNAME" "$STEAM_PASSWORD" \
+                        +@sSteamCmdForcePlatformType windows \
+                        +app_update "$SUBNAUTICA_APPID" validate \
+                        +quit
+      - name: Verify game files present
+        run: test -f "$GAME_DIR/Subnautica_Data/Managed/Assembly-CSharp.dll"
+      - name: Point the build at the game
+        run: echo "SUBNAUTICA_INSTALLATION_PATH=$GAME_DIR" >> "$GITHUB_ENV"
+
+      # --- Publish artifacts ---
+      - name: Publish Windows launcher (self-contained)
+        run: dotnet publish Nitrox.Launcher/Nitrox.Launcher.csproj -c Release -r win-x64 --self-contained -p:Version=$VERSION -o publish/launcher-win-x64
+      - name: Publish Windows server (self-contained)
+        run: dotnet publish Nitrox.Server.Subnautica/Nitrox.Server.Subnautica.csproj -c Release -r win-x64 --self-contained -p:Version=$VERSION -o publish/server-win-x64
+      - name: Publish Linux server (framework-dependent, for Docker)
+        run: dotnet publish Nitrox.Server.Subnautica/Nitrox.Server.Subnautica.csproj -c Release -r linux-x64 --no-self-contained -p:Version=$VERSION -o publish/server-linux-x64
+
+      # --- Package + checksums ---
+      - name: Zip Windows artifacts + SHA256SUMS
+        run: |
+          mkdir -p artifacts
+          (cd publish/launcher-win-x64 && zip -qr "$GITHUB_WORKSPACE/artifacts/Nitrox-win-x64-$VERSION.zip" .)
+          (cd publish/server-win-x64 && zip -qr "$GITHUB_WORKSPACE/artifacts/Nitrox.Server-win-x64-$VERSION.zip" .)
+          (cd artifacts && sha256sum *.zip > SHA256SUMS)
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-artifacts
+          path: artifacts/
+      - name: Upload Linux server output (for Docker job)
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-linux-x64
+          path: publish/server-linux-x64/
+
+  docker:
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download pre-published Linux server
+        uses: actions/download-artifact@v4
+        with:
+          name: server-linux-x64
+          path: publish/server-linux-x64
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/nitrox-server:${{ env.VERSION }}
+            ghcr.io/${{ github.repository_owner }}/nitrox-server:latest
+
+  release:
+    needs: [version, build, docker]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-artifacts
+          path: artifacts
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.version.outputs.version }}
+          name: Nitrox ${{ needs.version.outputs.version }}
+          generate_release_notes: true
+          files: |
+            artifacts/*.zip
+            artifacts/SHA256SUMS

@@ -39,8 +39,11 @@ internal sealed class Program
         serverStartStopWatch.Start();
         ConsoleUnhandledErrorHandler.Attach();
 
-        // Parse console args into config object for type-safety.
+        // Parse env vars + console args into config object for type-safety. Environment variables (NITROX_ prefix, e.g.
+        // NITROX_save / NITROX_game-path / NITROX_data-path / NITROX_assets-path / NITROX_embedded) are the lower-priority
+        // base so headless/containerized servers can be configured without args; explicit command-line args still override.
         IConfigurationRoot configuration = new ConfigurationBuilder()
+                                           .AddEnvironmentVariables("NITROX_")
                                            .AddCommandLine(args)
                                            .Build();
         startOptions = new ServerStartOptions();
@@ -72,11 +75,13 @@ internal sealed class Program
             EnvironmentName = NitroxEnvironment.DotnetEnvironment,
             ApplicationName = NitroxEnvironment.AppName
         });
-        // Nitrox config can be overriden by development.json or command line args if supplied.
+        // Nitrox config can be overriden by development.json, NITROX_ environment variables, or command line args if supplied.
+        // Env vars allow containerized servers to set in-game options too (e.g. NITROX_GameServer__MaxConnections=10).
         builder.Configuration
                .AddNitroxConfigFile<SubnauticaServerOptions>(startOptions.GetServerConfigFilePath(), SubnauticaServerOptions.CONFIG_SECTION_PATH, true, true)
                .AddConditionalCsharpProjectJsonFile(builder.Environment.IsDevelopment(), "server.Development.json", typeof(Program).Namespace, true, true)
                .AddConditionalUpstreamJsonFile(builder.Environment.IsDevelopment(), "server.Development.json", true, true)
+               .AddEnvironmentVariables("NITROX_")
                .AddCommandLine(args)
             ;
         builder.Logging

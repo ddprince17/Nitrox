@@ -116,6 +116,13 @@ internal sealed class NitroxWebsiteApiService
         [JsonPropertyName("md5")]
         public required string Md5Hash { get; init; }
 
+        /// <summary>
+        ///     Preferred (more collision-resistant) integrity hash. Used when present; otherwise the flow falls back to
+        ///     <see cref="Md5Hash" />. The website API may omit it; the GitHub source supplies it from the asset digest.
+        /// </summary>
+        [JsonPropertyName("sha256")]
+        public string? Sha256Hash { get; init; }
+
         [JsonPropertyName("filesize")]
         public required string FileSize { get; init; }
 

@@ -1,0 +1,9 @@
+# GitVersion (https://gitversion.net) base configuration for the release pipeline.
+#
+# The CI workflow derives the build/release version as:
+#     <MajorMinorPatch>.<CommitsSinceVersionSource>
+# e.g. 1.9.0.7 -> 1.9.0.8 -> ... so every push to master yields a unique, increasing 4-part version.
+# This format is a valid System.Version, which the launcher uses to detect newer GitHub releases.
+#
+# To bump major/minor, raise `next-version` below (the patch/commit height is computed automatically).
+next-version: 1.9.0

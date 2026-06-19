@@ -128,6 +128,19 @@ internal partial class MainWindowViewModel : ViewModelBase, IRoutingScreen
                     LauncherNotifier.Warning("Launcher may not be connected to internet");
                 }
                 UpdateAvailableOrUnofficial = await updatesViewModel.IsNitroxUpdateAvailableAsync();
+
+                // On startup, if a newer release is available, prompt the user to update now. DownloadUpdate shows its own
+                // accept/refuse confirmation and, on accept, performs the in-place upgrade and restarts the launcher.
+                if (NitroxEnvironment.IsReleaseMode && updatesViewModel.NewUpdateAvailable)
+                {
+                    await Dispatcher.UIThread.InvokeAsync(async () =>
+                    {
+                        if (updatesViewModel.DownloadUpdateCommand.CanExecute(null))
+                        {
+                            await updatesViewModel.DownloadUpdateCommand.ExecuteAsync(null);
+                        }
+                    });
+                }
             });
 
             _ = this.ShowAsync(launchGameViewModel).ContinueWithHandleError(ex => LauncherNotifier.Error(ex.Message));

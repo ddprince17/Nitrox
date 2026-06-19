@@ -1,0 +1,29 @@
+# Example Compose file for the Nitrox dedicated server. Copy to docker-compose.yml and adjust.
+services:
+  nitrox-server:
+    image: ghcr.io/ddprince17/nitrox-server:latest
+    container_name: nitrox-server
+    restart: unless-stopped
+    ports:
+      - "11000:11000/udp"
+    environment:
+      # --- Nitrox start options (bound to ServerStartOptions) ---
+      NITROX_save: "My World"
+      # NITROX_game-path: "/data/game/Subnautica"  # default; only change if you mount the game elsewhere
+      # NITROX_data-path: "/data/nitrox"           # where saves + server config are stored (default)
+      # --- In-game server options can be set too (section__key), e.g.: ---
+      # NITROX_GameServer__MaxConnections: "10"
+      # NITROX_GameServer__ServerPassword: "changeme"
+      # --- Only needed to DOWNLOAD the game (omit if you mount an existing install below) ---
+      # STEAM_USERNAME: "your_steam_login"
+      # STEAM_PASSWORD: "your_steam_password"
+    volumes:
+      - nitrox_game:/data/game      # caches the game when downloaded via SteamCMD
+      - nitrox_saves:/data/nitrox   # persists saves + server config
+      # To use an existing Subnautica install instead of downloading, mount it (read-only is fine) and
+      # remove the nitrox_game volume line above:
+      # - /path/to/Subnautica:/data/game/Subnautica:ro
+
+volumes:
+  nitrox_game:
+  nitrox_saves:

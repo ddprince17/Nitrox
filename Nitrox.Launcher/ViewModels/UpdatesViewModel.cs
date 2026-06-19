@@ -22,12 +22,13 @@ using Nitrox.Model.Platforms.OS.Shared;
 
 namespace Nitrox.Launcher.ViewModels;
 
-internal partial class UpdatesViewModel(NitroxWebsiteApiService nitroxWebsiteApi, DialogService dialogService, ServerService serverService, Func<Window> mainWindowProvider, BackupService backupService) : RoutableViewModelBase
+internal partial class UpdatesViewModel(NitroxWebsiteApiService nitroxWebsiteApi, GitHubReleasesApiService gitHubReleasesApi, DialogService dialogService, ServerService serverService, Func<Window> mainWindowProvider, BackupService backupService) : RoutableViewModelBase
 {
     private readonly DialogService dialogService = dialogService;
     private readonly ServerService serverService = serverService;
     private readonly Func<Window> mainWindowProvider = mainWindowProvider;
     private readonly NitroxWebsiteApiService nitroxWebsiteApi = nitroxWebsiteApi;
+    private readonly GitHubReleasesApiService gitHubReleasesApi = gitHubReleasesApi;
     private readonly BackupService backupService = backupService;
     private CancellationTokenSource? downloadCts;
 
@@ -59,7 +60,7 @@ internal partial class UpdatesViewModel(NitroxWebsiteApiService nitroxWebsiteApi
         try
         {
             Version currentVersion = NitroxEnvironment.Version;
-            Version latestVersion = (await nitroxWebsiteApi.GetNitroxLatestVersionAsync())?.Version ?? new Version(0, 0);
+            Version latestVersion = (await GetLatestUpdateCandidateAsync())?.Version ?? new Version(0, 0);
 
             NewUpdateAvailable = latestVersion > currentVersion;
             if (NewUpdateAvailable)
@@ -79,6 +80,38 @@ internal partial class UpdatesViewModel(NitroxWebsiteApiService nitroxWebsiteApi
         }
 
         return NewUpdateAvailable || !UsingOfficialVersion;
+    }
+
+    /// <summary>The newest release found across an update source, paired with a downloader bound to that source.</summary>
+    private sealed record UpdateCandidate(Version Version, NitroxWebsiteApiService.NitroxRelease Release, Func<CancellationToken, Task<HttpFileService.FileDownloader?>> GetDownloader);
+
+    /// <summary>
+    ///     Queries every configured update source (the Nitrox website API and this repo's GitHub Releases) and returns the
+    ///     one offering the highest version, so the launcher picks up updates from whichever source publishes first.
+    /// </summary>
+    private async Task<UpdateCandidate?> GetLatestUpdateCandidateAsync()
+    {
+        UpdateCandidate? best = null;
+
+        async Task ConsiderAsync(string sourceName, Func<Task<NitroxWebsiteApiService.NitroxRelease?>> getRelease, Func<CancellationToken, Task<HttpFileService.FileDownloader?>> getDownloader)
+        {
+            try
+            {
+                if (await getRelease() is { } release && (best is null || release.Version > best.Version))
+                {
+                    best = new UpdateCandidate(release.Version, release, getDownloader);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"Failed to query update source '{sourceName}': {ex.Message}");
+            }
+        }
+
+        await ConsiderAsync("Nitrox website", nitroxWebsiteApi.GetNitroxLatestVersionAsync, nitroxWebsiteApi.GetLatestNitroxAsync);
+        await ConsiderAsync("GitHub Releases", () => gitHubReleasesApi.GetNitroxLatestVersionAsync(), gitHubReleasesApi.GetLatestNitroxAsync);
+
+        return best;
     }
 
     internal override async Task ViewContentLoadAsync(CancellationToken cancellationToken = default)
@@ -191,14 +224,14 @@ internal partial class UpdatesViewModel(NitroxWebsiteApiService nitroxWebsiteApi
     [RelayCommand(CanExecute = nameof(CanDownloadUpdate), AllowConcurrentExecutions = false)]
     private async Task DownloadUpdate()
     {
-        if (await nitroxWebsiteApi.GetNitroxLatestVersionAsync() is not { CurrentPlatformInfo: {} downloadInfo } latestRelease)
+        if (await GetLatestUpdateCandidateAsync() is not { Release.CurrentPlatformInfo: {} downloadInfo } candidate)
         {
             LauncherNotifier.Error("No update information available for your platform. Please refresh and try again.");
             return;
         }
         DialogBoxViewModel confirmResult = await dialogService.ShowAsync<DialogBoxViewModel>(model =>
         {
-            model.Title = $"Download and install Nitrox {latestRelease.Version} ({downloadInfo.FileSizeMegaBytes:F1} MB)?";
+            model.Title = $"Download and install Nitrox {candidate.Version} ({downloadInfo.FileSizeMegaBytes:F1} MB)?";
             if (NitroxEnvironment.IsReleaseMode)
             {
                 model.Description = "The will overwrite your current Nitrox installation and restart Nitrox after the update is complete.\nPlease check if this update is compatible with your current save file before continuing.";
@@ -255,14 +288,14 @@ internal partial class UpdatesViewModel(NitroxWebsiteApiService nitroxWebsiteApi
             {
                 string currentDir = NitroxUser.LauncherPath ?? AppDomain.CurrentDomain.BaseDirectory;
                 string tempDir = Path.Combine(Path.GetTempPath(), $"NitroxUpdate {DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}");
-                string zipPath = Path.Combine(tempDir, $"Nitrox_{latestRelease.Version}.zip");
+                string zipPath = Path.Combine(tempDir, $"Nitrox_{candidate.Version}.zip");
                 string extractPath = Path.Combine(tempDir, "extract");
 
                 Directory.CreateDirectory(tempDir);
 
                 // Download the update
                 DownloadStatus = "Downloading...";
-                using (HttpFileService.FileDownloader? downloader = await nitroxWebsiteApi.GetLatestNitroxAsync(downloadCts.Token))
+                using (HttpFileService.FileDownloader? downloader = await candidate.GetDownloader(downloadCts.Token))
                 {
                     if (downloader == null)
                     {
@@ -279,15 +312,25 @@ internal partial class UpdatesViewModel(NitroxWebsiteApiService nitroxWebsiteApi
                     }
                 }
 
-                // Verify MD5 hash if provided
-                if (!string.IsNullOrEmpty(downloadInfo.Md5Hash))
+                // Verify integrity, preferring SHA256 (e.g. the GitHub asset digest) and falling back to MD5 (website API).
+                if (!string.IsNullOrEmpty(downloadInfo.Sha256Hash))
+                {
+                    DownloadStatus = "Verifying download...";
+                    DownloadProgress = 100;
+                    string downloadedHash = await Hashing.ComputeSha256HashAsync(zipPath);
+                    if (!string.Equals(downloadedHash, downloadInfo.Sha256Hash, StringComparison.OrdinalIgnoreCase))
+                    {
+                        throw new Exception($"Download verification failed (SHA256). Expected: {downloadInfo.Sha256Hash}, got: {downloadedHash}");
+                    }
+                }
+                else if (!string.IsNullOrEmpty(downloadInfo.Md5Hash))
                 {
                     DownloadStatus = "Verifying download...";
                     DownloadProgress = 100;
                     string downloadedHash = await Hashing.ComputeMd5HashAsync(zipPath);
                     if (!string.Equals(downloadedHash, downloadInfo.Md5Hash, StringComparison.OrdinalIgnoreCase))
                     {
-                        throw new Exception($"Download verification failed. Expected hash: {downloadInfo.Md5Hash}, got: {downloadedHash}");
+                        throw new Exception($"Download verification failed (MD5). Expected: {downloadInfo.Md5Hash}, got: {downloadedHash}");
                     }
                 }
 
