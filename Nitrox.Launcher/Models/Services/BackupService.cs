@@ -233,7 +233,10 @@ public class BackupService(IKeyValueStore keyValueStore)
             Directory.CreateDirectory(tempDir);
 
             string extractPath = Path.Combine(tempDir, "extract");
-            string launcherFilePath = Path.Combine(launcherPath, Path.GetFileName(NitroxUser.ExecutableFilePath) ?? "Nitrox.Launcher.exe");
+            // Relaunch the apphost, not the managed entry DLL (NitroxUser.ExecutableFilePath is the .dll on Windows,
+            // which `start` can't run). The runnable apphost is <LAUNCHER_APP_NAME>.exe on Windows, extensionless elsewhere.
+            string launcherFileName = OperatingSystem.IsWindows() ? $"{NitroxConstants.LAUNCHER_APP_NAME}.exe" : NitroxConstants.LAUNCHER_APP_NAME;
+            string launcherFilePath = Path.Combine(launcherPath, launcherFileName);
 
             string scriptPath;
             string scriptContent;

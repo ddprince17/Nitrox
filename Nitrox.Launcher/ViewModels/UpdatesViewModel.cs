@@ -150,7 +150,12 @@ internal partial class UpdatesViewModel(NitroxWebsiteApiService nitroxWebsiteApi
 
         string scriptPath;
         string scriptContent;
-        string launcherFilePath = Path.Combine(destinationPath, Path.GetFileName(NitroxUser.ExecutableFilePath) ?? throw new Exception("Failed to get executable file name"));
+        // Relaunch the apphost executable, not the managed entry DLL. On Windows NitroxUser.ExecutableFilePath is the
+        // .dll (Assembly.Location), which `start` can't run, so the launcher would never come back after an update; the
+        // runnable apphost is <LAUNCHER_APP_NAME>.exe. On Linux/macOS it's the extensionless <LAUNCHER_APP_NAME>. This
+        // matches the process name the wait-loop below polls for.
+        string launcherFileName = OperatingSystem.IsWindows() ? $"{NitroxConstants.LAUNCHER_APP_NAME}.exe" : NitroxConstants.LAUNCHER_APP_NAME;
+        string launcherFilePath = Path.Combine(destinationPath, launcherFileName);
 
         if (OperatingSystem.IsWindows())
         {
