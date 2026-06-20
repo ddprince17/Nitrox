@@ -79,8 +79,22 @@ internal class WorldService : IHostedService
         UpdateSerializer(options.Value.SerializerMode);
     }
 
+    /// <summary>
+    ///     Set once the world has been fully loaded/created. Guards against persisting default/empty state: the startup
+    ///     hibernate <c>SleepAsync</c> queues a save before <see cref="StartAsync" /> has loaded the world, and that race
+    ///     previously wrote AuroraCountdownTime=0 (StoryManager's default), so the world loaded back reporting
+    ///     "Aurora's state: already exploded".
+    /// </summary>
+    private volatile bool worldLoaded;
+
     public bool Save(string saveDir)
     {
+        if (!worldLoaded)
+        {
+            logger.ZLogWarning($"Ignored a save request that arrived before the world finished loading");
+            return false;
+        }
+
         // The persisted DTOs wrap the live Entity objects and the serializer walks their ChildEntities lists; hold the
         // shared entity-tree lock across both building the snapshot and serializing it so concurrent packet threads can't
         // mutate the tree mid-save (which previously threw "Collection was modified" and silently failed the autosave).
@@ -107,6 +121,11 @@ internal class WorldService : IHostedService
         {
             await CreateAndLoadWorldAsync();
         }
+        // The world is fully loaded/created now, so saves may run (see worldLoaded). Persist it once explicitly: the
+        // save the startup hibernate sleep queued was ignored (world wasn't loaded yet), so without this a freshly
+        // created world would only reach disk on the next autosave or when a player joins and then leaves.
+        worldLoaded = true;
+        await saveService.QueueActionAsync(SaveService.ServiceAction.SAVE, cancellationToken);
         await CreateFullEntityCacheIfRequested();
         return;
 

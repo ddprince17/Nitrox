@@ -62,7 +62,9 @@ internal partial class UpdatesViewModel(NitroxWebsiteApiService nitroxWebsiteApi
             Version currentVersion = NitroxEnvironment.Version;
             Version latestVersion = (await GetLatestUpdateCandidateAsync())?.Version ?? new Version(0, 0);
 
-            NewUpdateAvailable = latestVersion > currentVersion;
+            // Releases are tagged with 3-part SemVer (e.g. "1.9.1") while the running build carries a 4-part
+            // assembly version (e.g. "1.9.1.7"), so compare only major.minor.patch to decide if we're current.
+            NewUpdateAvailable = ToSemVer(latestVersion) > ToSemVer(currentVersion);
             if (NewUpdateAvailable)
             {
                 string versionMessage = $"A new version of the mod ({latestVersion}) is available.";
@@ -71,7 +73,7 @@ internal partial class UpdatesViewModel(NitroxWebsiteApiService nitroxWebsiteApi
             }
             Version = currentVersion.ToString();
             OfficialVersion = latestVersion.ToString();
-            UsingOfficialVersion = NitroxEnvironment.IsReleaseMode && latestVersion >= currentVersion;
+            UsingOfficialVersion = NitroxEnvironment.IsReleaseMode && ToSemVer(latestVersion) >= ToSemVer(currentVersion);
         }
         catch
         {
@@ -81,6 +83,12 @@ internal partial class UpdatesViewModel(NitroxWebsiteApiService nitroxWebsiteApi
 
         return NewUpdateAvailable || !UsingOfficialVersion;
     }
+
+    /// <summary>
+    ///     Reduces a version to its major.minor.patch components. Release tags use 3-part SemVer while the running
+    ///     build's assembly version is 4-part; comparing on these three components keeps the two formats aligned.
+    /// </summary>
+    private static Version ToSemVer(Version version) => new(version.Major, version.Minor, Math.Max(version.Build, 0));
 
     /// <summary>The newest release found across an update source, paired with a downloader bound to that source.</summary>
     private sealed record UpdateCandidate(Version Version, NitroxWebsiteApiService.NitroxRelease Release, Func<CancellationToken, Task<HttpFileService.FileDownloader?>> GetDownloader);
@@ -97,7 +105,7 @@ internal partial class UpdatesViewModel(NitroxWebsiteApiService nitroxWebsiteApi
         {
             try
             {
-                if (await getRelease() is { } release && (best is null || release.Version > best.Version))
+                if (await getRelease() is { } release && (best is null || ToSemVer(release.Version) > ToSemVer(best.Version)))
                 {
                     best = new UpdateCandidate(release.Version, release, getDownloader);
                 }

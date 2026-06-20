@@ -19,8 +19,12 @@
 # 4-part `1.9.0.x` scheme that GitVersion does not recognise as a version source.)
 next-version: 1.9.1
 
+# GitVersion's built-in main-line branch is keyed `main`, and its preset regex (^master$|^main$) already
+# matches this repo's `master` branch, so this just overrides that preset's increment (Patch is also the
+# preset default). Do NOT rename this key to `master`: a key that isn't a preset branch needs a full
+# definition (including `regex`), and GitVersion fails config validation without it.
 branches:
-  master:
+  main:
     increment: Patch
 
 commit-message-incrementing: Enabled
