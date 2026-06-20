@@ -1,4 +1,6 @@
 # Example Compose file for the Nitrox dedicated server. Copy to docker-compose.yml and adjust.
+# The container runs as non-root (UID 1654). Named volumes (below) get the right ownership automatically; if you
+# bind-mount a host dir for the data instead, make it writable by UID 1654 (e.g. `chown -R 1654:1654 ./data`).
 services:
   nitrox-server:
     image: ghcr.io/ddprince17/nitrox-server:latest
@@ -20,8 +22,8 @@ services:
     volumes:
       - nitrox_game:/data/game      # caches the game when downloaded via SteamCMD
       - nitrox_saves:/data/nitrox   # persists saves + server config
-      # To use an existing Subnautica install instead of downloading, mount it (read-only is fine) and
-      # remove the nitrox_game volume line above:
+      # To use an existing Subnautica install instead of downloading, mount it (read-only is fine, but the files
+      # must be readable by UID 1654 — game files normally are) and remove the nitrox_game volume line above:
       # - /path/to/Subnautica:/data/game/Subnautica:ro
 
 volumes:

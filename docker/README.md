@@ -78,3 +78,10 @@ Steam download (Option B) only:
 ## Ports
 
 `11000/udp` — the default Nitrox server port.
+
+## Runs as non-root
+
+The container runs as the base image's unprivileged `app` user (**UID 1654**), not root. Named volumes
+(`/data/game`, `/data/nitrox`) inherit the correct ownership automatically. If you bind-mount a host directory
+for the data instead, make it writable by UID 1654 (`chown -R 1654:1654 <dir>`). For Option A, the mounted game
+files only need to be **readable** by UID 1654 (they normally are).
