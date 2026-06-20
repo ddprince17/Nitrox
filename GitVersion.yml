@@ -1,9 +1,29 @@
-# GitVersion (https://gitversion.net) base configuration for the release pipeline.
+# GitVersion (https://gitversion.net) configuration for the release pipeline.
 #
-# The CI workflow derives the build/release version as:
-#     <MajorMinorPatch>.<CommitsSinceVersionSource>
-# e.g. 1.9.0.7 -> 1.9.0.8 -> ... so every push to master yields a unique, increasing 4-part version.
-# This format is a valid System.Version, which the launcher uses to detect newer GitHub releases.
+# Versioning is plain 3-part SemVer (https://semver.org): MAJOR.MINOR.PATCH, e.g. 1.9.1.
+# The CI workflow consumes GitVersion's `majorMinorPatch` output directly as the build/release version
+# (still a valid System.Version, which the launcher uses to detect newer GitHub releases).
 #
-# To bump major/minor, raise `next-version` below (the patch/commit height is computed automatically).
-next-version: 1.9.0
+# How the version advances:
+#   - Every release pushed to master is tagged: the Release workflow creates a GitHub tag for the
+#     computed version, and GitVersion uses that tag as the version source.
+#   - The next release after a tag automatically increments the PATCH (1.9.1 -> 1.9.2 -> ...).
+#   - To bump MINOR or MAJOR instead, add a marker to any commit message since the last tag:
+#       +semver: feature    (or +semver: minor)    ->  1.9.1 -> 1.10.0
+#       +semver: major      (or +semver: breaking) ->  1.9.1 -> 2.0.0
+#       +semver: patch      (or +semver: fix)      ->  explicit patch bump (this is the default)
+#       +semver: none       (or +semver: skip)     ->  no version change for that commit
+#
+# `next-version` only bootstraps the first release until a 3-part SemVer tag exists; once the pipeline
+# has tagged a release the tag drives the version and this value is ignored. (Previous releases used a
+# 4-part `1.9.0.x` scheme that GitVersion does not recognise as a version source.)
+next-version: 1.9.1
+
+branches:
+  master:
+    increment: Patch
+
+commit-message-incrementing: Enabled
+major-version-bump-message: '\+semver:\s?(breaking|major)'
+minor-version-bump-message: '\+semver:\s?(feature|minor)'
+patch-version-bump-message: '\+semver:\s?(fix|patch)'
