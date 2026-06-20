@@ -61,3 +61,14 @@ We do not accept donations to the mod.  Those wishing to give money can do so he
 
 ### Why the name 'Nitrox'?
 Nitrox is an alternative air mixture, used by scuba divers, to achieve longer bottom times. As a mod, it will provide a new dimension of gameplay to extend your enjoyment.
+
+## Docker (dedicated server)
+A containerized Nitrox **dedicated server** is published to GHCR on every push to `master`:
+
+```
+ghcr.io/ddprince17/nitrox-server:latest
+```
+
+The image ships **only the server** — Subnautica's (copyrighted) game files are not included. You either mount an existing install or let the container download it once via SteamCMD, and configure everything through `NITROX_*` environment variables.
+
+➡️ Full setup, configuration reference, and a `docker-compose` example: **[`docker/README.md`](docker/README.md)**.

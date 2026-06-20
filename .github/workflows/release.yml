@@ -144,6 +144,18 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository_owner }}/nitrox-server:${{ env.VERSION }}
             ghcr.io/${{ github.repository_owner }}/nitrox-server:latest
+          # OCI metadata for the GHCR package page. NOTE: GHCR has no way to render a per-package
+          # README, so the package page always shows the repo's root README.md (Docker usage is
+          # surfaced there + in docker/README.md). These labels set the "About" description, link
+          # the package to the repo, and add provenance.
+          labels: |
+            org.opencontainers.image.title=Nitrox dedicated server
+            org.opencontainers.image.description=Containerized Nitrox dedicated server for Subnautica. Ships only the server (no game files): mount an existing Subnautica install or download it via SteamCMD at runtime, and configure with NITROX_* env vars. Setup guide: https://github.com/${{ github.repository }}/blob/master/docker/README.md
+            org.opencontainers.image.documentation=https://github.com/${{ github.repository }}/blob/master/docker/README.md
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ env.VERSION }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.licenses=GPL-3.0
 
   release:
     needs: [version, build, docker]
