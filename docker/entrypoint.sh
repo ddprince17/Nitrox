@@ -2,9 +2,11 @@
 # Ensures Subnautica game files are available (mounted or downloaded via SteamCMD), then starts the Nitrox server.
 set -euo pipefail
 
-# NITROX_game-path contains a hyphen, which POSIX shells can't expand with $VAR, so read it via printenv.
+# NITROX_game-path / NITROX_data-path contain a hyphen, which POSIX shells can't expand with $VAR, so read via printenv.
 GAME_DIR="$(printenv 'NITROX_game-path' 2>/dev/null || true)"
 GAME_DIR="${GAME_DIR:-/data/game/Subnautica}"
+DATA_DIR="$(printenv 'NITROX_data-path' 2>/dev/null || true)"
+DATA_DIR="${DATA_DIR:-/data/nitrox}"
 APPID="${SUBNAUTICA_APPID:-264710}"
 STEAMCMD_DIR="${STEAMCMD_DIR:-/opt/steamcmd}"
 
@@ -38,5 +40,21 @@ EOF
     exit 1
 fi
 
-echo "[nitrox] Starting Nitrox server (save: ${NITROX_save:-My World})..."
-exec dotnet /app/Nitrox.Server.Subnautica.dll "$@"
+echo "[nitrox] Starting Nitrox server (save: ${NITROX_save:-My World}, data: $DATA_DIR)..."
+
+# The server resolves its saves/config directory from the --data-path COMMAND-LINE arg: NitroxDirectory reads
+# argv directly and ignores the NITROX_data-path env var (that env only binds to ServerStartOptions). Without
+# this, saves land in ~/.local/share/Nitrox instead of the mounted /data/nitrox volume. Forward $DATA_DIR as the
+# arg, unless the caller already passed their own --data-path.
+data_path_given=false
+for arg in "$@"; do
+    case "$arg" in
+        --data-path | --data-path=*) data_path_given=true; break ;;
+    esac
+done
+
+if [ "$data_path_given" = true ]; then
+    exec dotnet /app/Nitrox.Server.Subnautica.dll "$@"
+else
+    exec dotnet /app/Nitrox.Server.Subnautica.dll --data-path "$DATA_DIR" "$@"
+fi
